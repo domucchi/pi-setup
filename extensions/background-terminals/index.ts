@@ -13,7 +13,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import { Key, matchesKey, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
   BG_KILL_DESCRIPTION,
@@ -25,6 +25,8 @@ import {
   BG_STATUS_DESCRIPTION,
   buildCompletionMessage,
   buildListResult,
+  buildPsDetailLines,
+  buildPsLabel,
   buildStartResult,
   buildStatusResult,
   describeOutcome,
@@ -227,22 +229,48 @@ export default function backgroundTerminals(pi: ExtensionAPI) {
   pi.registerCommand("ps", {
     description: "Inspect background terminals",
     handler: async (_args, ctx) => {
-      const entries = manager.list();
-      if (entries.length === 0) {
-        ctx.ui.notify("No background terminals", "info");
-        return;
-      }
-      const labels = entries.map(
-        (entry) => `${entry.id} [${describeOutcome(entry)}] ${entry.title}`,
-      );
-      const picked = await ctx.ui.select("Background terminals:", labels);
-      if (picked === undefined) return;
-      const entry = entries[labels.indexOf(picked)];
-      if (entry?.spill) {
-        ctx.ui.notify(
-          `${entry.id}: ${describeOutcome(entry)} · logs: ${entry.spill.stdoutPath}`,
-          "info",
-        );
+      // Loop: picker → detail → back to picker, until Esc on the picker.
+      for (;;) {
+        const entries = manager.list();
+        if (entries.length === 0) {
+          ctx.ui.notify("No background terminals", "info");
+          return;
+        }
+        const labels = entries.map(buildPsLabel);
+        const picked = await ctx.ui.select("Background terminals:", labels);
+        if (picked === undefined) return;
+        const entry = entries[labels.indexOf(picked)];
+        if (!entry) return;
+
+        await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
+          const interval = setInterval(() => tui.requestRender(), 1_000);
+          return {
+            render: (width: number) => {
+              const lines = buildPsDetailLines(
+                manager.get(entry.id) ?? entry,
+              ).map((line) => truncateToWidth(` ${line}`, width));
+              lines.push("");
+              lines.push(
+                truncateToWidth(
+                  theme.fg("dim", " Esc back to list"),
+                  width,
+                ),
+              );
+              return lines;
+            },
+            invalidate: () => {},
+            handleInput: (data: string) => {
+              if (
+                matchesKey(data, Key.escape) ||
+                matchesKey(data, Key.enter) ||
+                data === "q"
+              ) {
+                done(undefined);
+              }
+            },
+            dispose: () => clearInterval(interval),
+          };
+        });
       }
     },
   });
