@@ -25,16 +25,18 @@ something used for actual work, with a runnable check.
 Repo, installer with `--dry-run`/`--check`, symlinks into `~/.pi/agent`,
 agentic-setup skills linked per-skill.
 
-## Phase 1 — daily-drive baseline
+## Phase 1 — daily-drive baseline (in progress, 2026-07-16)
 
-- Author `APPEND_SYSTEM.md` — start near-empty, add only rules that observed
-  friction demands.
-- Settings: default provider/model, thinking level, `--models` roster
-  mirroring the routing table (Sol / Terra / Luna, Grok, Gemini; Anthropic via
-  API key if wanted).
-- Verify skills, prompt templates, and AGENTS.md discovery in a real session.
-- Exit: pi used for real work for ~a week, with a friction list — that list,
-  not this plan, drives what gets built next.
+- [x] Author `APPEND_SYSTEM.md` — five doctrine bullets, verified live (pi
+  quoted the verification rule back in a `-p` session).
+- [x] Settings: `enabledModels` roster gpt-5.6-sol / terra / luna (all of
+  today's authed providers); Sol at high thinking stays default. Grok /
+  Gemini / Anthropic-API join the roster when keys land (phase 3 prereq).
+- [x] Skills discovery verified live: all six agentic-setup skills listed by
+  a real session (plus pre-existing `~/.agents/skills/` extras).
+- [ ] Ctrl+P roster cycling — interactive, verify by hand.
+- [ ] Exit: pi used for real work for ~a week, logging to `FRICTION.md` —
+  that list, not this plan, drives what gets built next.
 
 ## Phase 2 — safety story
 
