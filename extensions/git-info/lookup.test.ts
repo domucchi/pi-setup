@@ -94,4 +94,17 @@ describe("lookupChange", () => {
     expect(await lookupChange("feat", run)).toBeNull();
     expect(run).toHaveBeenCalledTimes(3); // git, then both CLIs (unknown forge)
   });
+
+  it("routes a configured self-hosted host straight to glab", async () => {
+    const run = runner({
+      git: ok("git@git.example.com:team/app.git"),
+      glab: ok(GL_MR),
+    });
+    const result = await lookupChange("feat", run, {
+      gitlabHosts: ["git.example.com"],
+      githubHosts: [],
+    });
+    expect(result?.kind).toBe("mr");
+    expect(run).toHaveBeenCalledTimes(2); // git + glab only, no gh probe
+  });
 });
