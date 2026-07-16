@@ -7,8 +7,11 @@ something used for actual work, with a runnable check.
 
 ## Principles
 
-- **Adopt before build.** Install or fork existing extensions; write from
-  scratch only when nothing exists.
+- **Adopt before build.** Fork existing extensions; write from scratch only
+  when nothing exists.
+- **Vendor everything.** All third-party extensions live in `extensions/` with
+  an `UPSTREAM.md`; `pi install`/`pi update` are not used. Updates arrive as
+  reviewable diffs (see `extensions/README.md`).
 - **Stay on the extension surface.** Never fork pi core. Pin the pi version
   within a phase; update deliberately and re-run checks after.
 - **Anthropic models enter pi via API key only.** Claude subscription stays in
@@ -44,8 +47,10 @@ Decide before subagents multiply the blast radius:
 
 ## Phase 3 — workflows + model routing
 
-- `pi install npm:@quintinshaw/pi-dynamic-workflows` (use as-is; vendor only
-  if it needs changes).
+- Vendor QuintinShaw/pi-dynamic-workflows into `extensions/` (use as-is,
+  `UPSTREAM.md` with commit).
+- First vendored extension → write `bin/check-updates.sh` alongside it and
+  verify it detects/pulls an upstream bump.
 - Map `~/.pi/workflows/model-tiers.json` onto the routing table so
   orchestration effort levels pick the intended providers/models.
 - Exit: one real multi-agent workflow (e.g. adversarial review of an actual
