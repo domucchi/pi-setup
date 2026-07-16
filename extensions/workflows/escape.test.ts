@@ -33,13 +33,19 @@ describe("sandbox escape hardening", () => {
     expect(result.ok && typeof result.value === "number").toBe(false);
   }, 20_000);
 
-  it("determinism guards cannot be reassigned or deleted", async () => {
+  // The determinism guards are ADVISORY (see sandbox-child.cjs): they catch
+  // honest nondeterminism, not an adversary. These cover the common bypasses
+  // we DO lock — reassigning/deleting/shadowing the guarded bindings must
+  // fail (either throw → run not ok, or the guard still throws → not a
+  // number). Deep prototype paths are deliberately not chased.
+  it("locked determinism guards resist reassignment, deletion, and shadowing", async () => {
     for (const body of [
       "Math.random = () => 1; return Math.random();",
       "Date.now = () => 1; return Date.now();",
-      "delete Math.random; return typeof Math.random === 'function' ? Math.random() : 'gone';",
+      "delete Math.random; return Math.random();",
       "'use strict'; Math.random = () => 1; return Math.random();",
-      "Date = class { static now() { return 1; } }; return Date.now();",
+      "Math = { random: () => 7 }; return Math.random();",
+      "Date = { now: () => 7 }; return Date.now();",
       "Object.defineProperty(Math, 'random', { value: () => 1 }); return Math.random();",
     ]) {
       const result = await runWorkflowSandbox({
@@ -48,8 +54,10 @@ describe("sandbox escape hardening", () => {
         maxAgentCalls: 32,
         handlers: noAgents,
       });
-      // A successful numeric return would mean the guard was defeated.
-      expect(result.ok && typeof result.value === "number", body).toBe(false);
+      // Guard held if the run failed (throw) OR the value is not a number
+      // (the throwing guard still ran). A numeric result means it was defeated.
+      const defeated = result.ok && typeof result.value === "number";
+      expect(defeated, body).toBe(false);
     }
   }, 40_000);
 

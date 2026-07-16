@@ -151,8 +151,6 @@ export default function workflows(pi: ExtensionAPI) {
     };
     const run: ActiveRun = { record, dir: store.dir, agents: new Map(), logs: [], abort };
     activeRuns.set(runId, run);
-    store.saveInputs(options.source, options.args, meta);
-    store.saveStatus(record);
     updateWidget();
 
     const progress = () => {
@@ -166,6 +164,7 @@ export default function workflows(pi: ExtensionAPI) {
     };
 
     const requestMeta = new Map<number, { promptHash: string; optsHash: string }>();
+    // createAgentRunner does not throw; safe to hold as a const for finally.
     const runner = createAgentRunner({
       context: {
         cwd: options.ctx.cwd,
@@ -217,43 +216,59 @@ export default function workflows(pi: ExtensionAPI) {
       },
     });
 
-    const result = await runWorkflowSandbox({
-      body,
-      args: options.args,
-      maxAgentCalls: MAX_AGENT_CALLS,
-      signal: abort.signal,
-      handlers: {
-        onPhase: (title) => {
-          run.currentPhase = title;
-          updateWidget();
-          progress();
+    // Everything fallible runs here; the finally guarantees the run is
+    // finalized in memory + on disk and the runner disposed, so a throw
+    // (disk error, etc.) can't leave a stale "running" run or leak child
+    // sessions.
+    try {
+      store.saveInputs(options.source, options.args, meta);
+      store.saveStatus(record);
+      const result = await runWorkflowSandbox({
+        body,
+        args: options.args,
+        maxAgentCalls: MAX_AGENT_CALLS,
+        signal: abort.signal,
+        handlers: {
+          onPhase: (title) => {
+            run.currentPhase = title;
+            updateWidget();
+            progress();
+          },
+          onLog: (message) => {
+            run.logs.push(message);
+            progress();
+          },
+          runAgent: (request) => {
+            requestMeta.set(request.id, {
+              promptHash: hashForJournal(request.prompt),
+              optsHash: hashForJournal(request.opts),
+            });
+            return runner.run(request);
+          },
         },
-        onLog: (message) => {
-          run.logs.push(message);
-          progress();
-        },
-        runAgent: (request) => {
-          requestMeta.set(request.id, {
-            promptHash: hashForJournal(request.prompt),
-            optsHash: hashForJournal(request.opts),
-          });
-          return runner.run(request);
-        },
-      },
-    });
-
-    await runner.disposeAll();
-    record.settledAt = Date.now();
-    record.status = abort.signal.aborted
-      ? "aborted"
-      : result.ok
-        ? "completed"
-        : "failed";
-    if (!result.ok) record.error = result.error;
-    store.saveStatus(record);
-    if (result.ok) store.saveResult(result.value);
-    updateWidget();
-    return { record, result, dir: store.dir };
+      });
+      record.status = abort.signal.aborted
+        ? "aborted"
+        : result.ok
+          ? "completed"
+          : "failed";
+      if (!result.ok) record.error = result.error;
+      if (result.ok) store.saveResult(result.value);
+      return { record, result, dir: store.dir };
+    } catch (error) {
+      record.status = "failed";
+      record.error = error instanceof Error ? error.message : String(error);
+      throw error;
+    } finally {
+      record.settledAt ??= Date.now();
+      await runner.disposeAll();
+      try {
+        store.saveStatus(record);
+      } catch {
+        // Disk unavailable during teardown — in-memory record is still finalized.
+      }
+      updateWidget();
+    }
   }
 
   pi.registerTool({
@@ -292,7 +307,6 @@ export default function workflows(pi: ExtensionAPI) {
         // tool result can return it immediately (per DESIGN.md).
         const { meta } = extractMeta(source!);
         const runId = newRunId();
-        const startedAt = Date.now();
         executeRun({
           source: source!,
           args: params.args,
@@ -307,23 +321,9 @@ export default function workflows(pi: ExtensionAPI) {
             );
           })
           .catch((error) => {
-            // A detached run must never fail silently: persist a failed
-            // status where possible and always notify with the runId.
+            // executeRun already finalized status + disk and disposed the
+            // runner in its finally; the detached path only notifies.
             const message = error instanceof Error ? error.message : String(error);
-            try {
-              createRunStore(runId).saveStatus({
-                runId,
-                name: meta.name,
-                description: meta.description,
-                status: "failed",
-                startedAt,
-                settledAt: Date.now(),
-                agentCount: 0,
-                error: message,
-              });
-            } catch {
-              // Disk unavailable — the follow-up below is still sent.
-            }
             deliverOrQueue(
               runId,
               buildBackgroundFailureMessage(meta.name, runId, message),

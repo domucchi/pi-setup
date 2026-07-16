@@ -172,7 +172,7 @@ const BOOTSTRAP = `(function (__host, __argsJson) {
   const workflow = function () { throw new Error("Nested workflow() is not supported in this runtime."); };
   const args = freeze(__argsJson === undefined ? undefined : JSON.parse(__argsJson));
 
-  return { agent, parallel, pipeline, phase, log, budget, workflow, args, Date: SafeDate };
+  return { agent, parallel, pipeline, phase, log, budget, workflow, args, Date: SafeDate, Math: Math };
 })`;
 
 async function run(init) {
@@ -248,7 +248,7 @@ async function run(init) {
     return fail(`Sandbox bootstrap failed: ${error.message}`);
   }
   const argsJson = init.args === undefined ? undefined : JSON.stringify(init.args);
-  const { Date: safeDate, ...dsl } = factory(hostBridge, argsJson);
+  const { Date: safeDate, Math: safeMath, ...dsl } = factory(hostBridge, argsJson);
   // api.* are context-native (built by context code); installing them as
   // context globals keeps them context-native.
   Object.assign(sandbox, dsl);
@@ -256,6 +256,19 @@ async function run(init) {
   // working now() (the guard on SafeDate.now only helps if Date is Date).
   Object.defineProperty(sandbox, "Date", {
     value: safeDate,
+    writable: false,
+    configurable: false,
+  });
+  // Same for the Math binding, so `Math = { random: () => 7 }` can't
+  // shadow the locked Math.random guard. NOTE: the determinism guards are
+  // ADVISORY — they catch honest nondeterminism (the model following our
+  // DSL rules), not an adversary. A determined script can still reach real
+  // time/randomness via deep prototype paths; resume (when built) will
+  // validate determinism rather than assume these guards are airtight.
+  // Security isolation is the OS --permission sandbox + empty env + the
+  // no-host-Function-constructor context, none of which this affects.
+  Object.defineProperty(sandbox, "Math", {
+    value: safeMath,
     writable: false,
     configurable: false,
   });
