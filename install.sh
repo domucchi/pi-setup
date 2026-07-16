@@ -26,6 +26,7 @@ link() {
 link "$REPO/extensions" "$AGENT_DIR/extensions"
 link "$REPO/agents" "$AGENT_DIR/agents"
 link "$REPO/skills" "$AGENT_DIR/skills"
+link "$REPO/themes" "$AGENT_DIR/themes"
 link "$REPO/AGENTS.md" "$AGENT_DIR/AGENTS.md"
 
 # node_modules must resolve from the extensions' location.

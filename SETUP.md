@@ -63,6 +63,15 @@ directly, or `excludeTools` to hide noisy ones.
 processes, remote servers make network calls. Add servers you trust, like any
 dependency.
 
+## Themes
+
+Themes live in `themes/*.json` (symlinked into `~/.pi/agent/themes`). Included:
+`rose-pine` (pink, default) and `catppuccin-mocha` (pastel). pi also ships
+`dark` and `light`. Switch any time via `/settings` in the TUI, or set
+`"theme": "<name>"` in `~/.pi/agent/settings.json`. Add a theme by dropping
+another JSON in `themes/` (all 51 `colors` keys required — see the schema in
+each file's `$schema`).
+
 ## Development
 
 - `npm test` — vitest (pure-logic modules, the sandbox, arg builders).

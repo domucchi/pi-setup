@@ -29,7 +29,6 @@ import {
 import {
   createRunStore,
   hashForJournal,
-  listRunsFromDisk,
   newRunId,
   type RunRecord,
 } from "./src/artifacts.ts";
@@ -363,15 +362,13 @@ export default function workflows(pi: ExtensionAPI) {
   pi.registerCommand("workflows", {
     description: "Inspect workflow runs",
     handler: async (_args, ctx) => {
-      // Same picker → detail → back loop as /subagents and /ps.
-      const combined = () => {
-        const active = [...activeRuns.values()].map((run) => run.record);
-        const activeIds = new Set(active.map((r) => r.runId));
-        const disk = listRunsFromDisk(activeIds).filter(
-          (r) => !activeIds.has(r.runId),
-        );
-        return [...active, ...disk];
-      };
+      // Only this session's runs (active + completed, held in memory for the
+      // process). Past runs from other sessions live on disk but would be
+      // noise here; resumed-session rehydration from disk is a future TODO.
+      const combined = () =>
+        [...activeRuns.values()]
+          .map((run) => run.record)
+          .sort((a, b) => b.startedAt - a.startedAt);
       for (;;) {
         if (combined().length === 0) {
           ctx.ui.notify("No workflow runs", "info");

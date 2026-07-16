@@ -11,6 +11,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { runCommand } from "../shared/process.ts";
 import { makeRefreshCoordinator } from "./src/coordinator.ts";
 import { lookupChange } from "./src/lookup.ts";
@@ -31,8 +32,26 @@ export default function gitInfo(pi: ExtensionAPI) {
   let pollTimer: ReturnType<typeof setInterval> | undefined;
   const coordinator = makeRefreshCoordinator();
 
+  // Render git info as a right-aligned widget above the input, not in the
+  // footer (keeps the footer to one line; branch/dirty/PR sit top-right).
   const publish = (ctx: ExtensionContext) => {
-    ctx.ui.setStatus("git", formatGitStatus(state));
+    if (ctx.mode !== "tui") return;
+    const branch = state.isRepository ? state.branch : null;
+    const detail = formatGitStatus(state); // "±3 MR!3 (draft)" or undefined
+    if (!branch) {
+      ctx.ui.setWidget("git", undefined);
+      return;
+    }
+    ctx.ui.setWidget("git", (_tui, theme) => ({
+      invalidate() {},
+      render(width: number) {
+        const line =
+          theme.fg("success", branch) +
+          (detail ? theme.fg("dim", `  ${detail}`) : "");
+        const pad = Math.max(0, width - visibleWidth(line) - 1);
+        return [" ".repeat(pad) + line];
+      },
+    }));
   };
 
   async function refreshOnce(
