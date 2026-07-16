@@ -35,7 +35,8 @@ echo
 echo "Checking external tools:"
 command -v fd >/dev/null 2>&1 && echo "  ✓ fd" || echo "  ✗ fd — install with: brew install fd"
 command -v rg >/dev/null 2>&1 && echo "  ✓ rg" || echo "  ✗ rg — install with: brew install ripgrep"
-command -v gh >/dev/null 2>&1 && echo "  ✓ gh (git-info PR lookups)" || echo "  · gh not found — PR info in git-info will be skipped"
+command -v gh >/dev/null 2>&1 && echo "  ✓ gh (GitHub PR lookups)" || echo "  · gh not found — GitHub PR info skipped"
+command -v glab >/dev/null 2>&1 && echo "  ✓ glab (GitLab MR lookups)" || echo "  · glab not found — GitLab MR info skipped"
 
 echo
 echo "Done. Start pi to load the harness."

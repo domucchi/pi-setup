@@ -1,4 +1,6 @@
 export interface PullRequestInfo {
+  /** "pr" for GitHub pull requests, "mr" for GitLab merge requests. */
+  kind: "pr" | "mr";
   number: number;
   url: string;
   isDraft: boolean;
@@ -26,24 +28,48 @@ export function countChangedFiles(status: string) {
   return status.split("\n").filter(Boolean).length;
 }
 
-/** Parse `gh pr view --json number,url,state,isDraft`; only OPEN PRs count. */
-export function parsePullRequestJson(json: string): PullRequestInfo | null {
-  let value: unknown;
+function parseJson(json: string): Record<string, unknown> | null {
   try {
-    value = JSON.parse(json);
+    const value = JSON.parse(json);
+    return typeof value === "object" && value !== null
+      ? (value as Record<string, unknown>)
+      : null;
   } catch {
     return null;
   }
-  if (typeof value !== "object" || value === null) return null;
-  const record = value as Record<string, unknown>;
+}
+
+/** Parse `gh pr view --json number,url,state,isDraft`; only OPEN PRs count. */
+export function parseGitHubPrJson(json: string): PullRequestInfo | null {
+  const record = parseJson(json);
+  if (!record) return null;
   if (typeof record.number !== "number") return null;
   if (typeof record.url !== "string") return null;
   if (record.state !== "OPEN") return null;
 
   return {
+    kind: "pr",
     number: record.number,
     url: record.url,
     isDraft: record.isDraft === true,
+  };
+}
+
+/** Parse `glab mr view --output json`; only opened MRs count. */
+export function parseGitLabMrJson(json: string): PullRequestInfo | null {
+  const record = parseJson(json);
+  if (!record) return null;
+  // GitLab: iid is the !N number, web_url the link, state "opened".
+  if (typeof record.iid !== "number") return null;
+  if (typeof record.web_url !== "string") return null;
+  if (record.state !== "opened") return null;
+
+  return {
+    kind: "mr",
+    number: record.iid,
+    url: record.web_url,
+    // GitLab moved from work_in_progress to draft; accept either.
+    isDraft: record.draft === true || record.work_in_progress === true,
   };
 }
 
@@ -56,9 +82,9 @@ export function formatGitStatus(state: GitInfoState) {
   const parts: string[] = [];
   if (state.changedFiles > 0) parts.push(`±${state.changedFiles}`);
   if (state.pullRequest) {
-    parts.push(
-      `PR#${state.pullRequest.number}${state.pullRequest.isDraft ? " (draft)" : ""}`,
-    );
+    const { kind, number, isDraft } = state.pullRequest;
+    const ref = kind === "mr" ? `MR!${number}` : `PR#${number}`;
+    parts.push(`${ref}${isDraft ? " (draft)" : ""}`);
   }
   return parts.length > 0 ? parts.join(" ") : undefined;
 }

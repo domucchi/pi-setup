@@ -1,9 +1,10 @@
 /**
- * git-info — branch, dirty-file count, and open-PR info in the footer.
+ * git-info — branch, dirty-file count, and open PR/MR info in the footer.
  *
  * Refreshes on session start, user input, and after every tool execution,
  * plus a slow poll so external changes (checkouts in another terminal)
- * show up. `gh pr view` runs only when the branch changes or on /pr.
+ * show up. The PR/MR lookup (gh for GitHub, glab for GitLab, chosen from
+ * the remote URL) runs only when the branch changes or on /pr.
  */
 
 import type {
@@ -12,16 +13,16 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { runCommand } from "../shared/process.ts";
 import { makeRefreshCoordinator } from "./src/coordinator.ts";
+import { lookupChange } from "./src/lookup.ts";
 import {
   countChangedFiles,
   emptyGitInfoState,
   formatGitStatus,
-  parsePullRequestJson,
 } from "./src/state.ts";
 
 const POLL_INTERVAL_MS = 3_000;
 const GIT_TIMEOUT_MS = 3_000;
-const GH_TIMEOUT_MS = 10_000;
+const FORGE_TIMEOUT_MS = 10_000;
 
 export default function gitInfo(pi: ExtensionAPI) {
   let state = emptyGitInfoState();
@@ -97,18 +98,16 @@ export default function gitInfo(pi: ExtensionAPI) {
 
     if (forcePullRequest || branchChanged) {
       queriedPrBranch = branchName;
-      const result = await runCommand(
-        "gh",
-        ["pr", "view", branchName, "--json", "number,url,state,isDraft"],
-        ctx.cwd,
-        GH_TIMEOUT_MS,
+      const pullRequest = await lookupChange(branchName, (command, args) =>
+        runCommand(
+          command,
+          args,
+          ctx.cwd,
+          command === "git" ? GIT_TIMEOUT_MS : FORGE_TIMEOUT_MS,
+        ),
       );
       if (refreshGeneration !== generation) return;
-      state = {
-        ...state,
-        pullRequest:
-          result.code === 0 ? parsePullRequestJson(result.stdout) : null,
-      };
+      state = { ...state, pullRequest };
       publish(ctx);
     }
   }
@@ -155,18 +154,20 @@ export default function gitInfo(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("pr", {
-    description: "Refresh git and pull request information",
+    description: "Refresh git and pull/merge request information",
     handler: async (_args, ctx) => {
       await refresh(ctx, true);
       if (!state.isRepository) {
         ctx.ui.notify("Not a git repository", "warning");
       } else if (state.pullRequest) {
+        const { kind, number, url } = state.pullRequest;
+        const ref = kind === "mr" ? `MR !${number}` : `PR #${number}`;
+        ctx.ui.notify(`${ref}: ${url}`, "info");
+      } else {
         ctx.ui.notify(
-          `PR #${state.pullRequest.number}: ${state.pullRequest.url}`,
+          `No open PR/MR found for ${state.branch}`,
           "info",
         );
-      } else {
-        ctx.ui.notify(`No open PR found for ${state.branch}`, "info");
       }
     },
   });

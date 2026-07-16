@@ -20,8 +20,9 @@ any target that already exists as a real file.
 - **fd** and **rg** — required by the file-search extension
   (`brew install fd ripgrep`, or your package manager). The extension
   fails a call with an install hint if either is missing.
-- **gh** — optional; git-info uses it for PR lookups and silently skips
-  them when absent.
+- **gh** / **glab** — optional; git-info shows the open PR (GitHub) or MR
+  (GitLab) for the current branch, picking the CLI from the remote URL. It
+  silently skips the lookup when the matching CLI is absent.
 
 ## Extensions run under Node
 
