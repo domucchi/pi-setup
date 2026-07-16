@@ -38,5 +38,16 @@ command -v rg >/dev/null 2>&1 && echo "  ✓ rg" || echo "  ✗ rg — install w
 command -v gh >/dev/null 2>&1 && echo "  ✓ gh (GitHub PR lookups)" || echo "  · gh not found — GitHub PR info skipped"
 command -v glab >/dev/null 2>&1 && echo "  ✓ glab (GitLab MR lookups)" || echo "  · glab not found — GitLab MR info skipped"
 
+# MCP transport is the one piece we install rather than hand-write.
+MCP_PKG="npm:pi-mcp-adapter@2.11.0"
+echo
+if pi list 2>/dev/null | grep -q "pi-mcp-adapter"; then
+  echo "MCP: pi-mcp-adapter already installed."
+else
+  echo "Installing MCP adapter ($MCP_PKG)…"
+  pi install "$MCP_PKG" || echo "  ! pi install failed — run it manually: pi install $MCP_PKG"
+fi
+echo "  Configure servers in $AGENT_DIR/mcp.json (cp mcp.json.example)."
+
 echo
 echo "Done. Start pi to load the harness."

@@ -1,0 +1,16 @@
+{
+  "settings": {
+    "requestTimeoutMs": 30000
+  },
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "~/Code"]
+    },
+    "example-remote": {
+      "url": "https://mcp.example.com/mcp",
+      "headers": { "Authorization": "Bearer ${EXAMPLE_MCP_TOKEN}" },
+      "directTools": ["search", "fetch"]
+    }
+  }
+}

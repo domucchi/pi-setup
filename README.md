@@ -19,6 +19,10 @@ rather than installed as a package.
 - **web-access** — `web_fetch` (keyless, local HTML→markdown) and
   `web_search` (Exa; set `EXA_API_KEY`).
 
+MCP servers are provided by the installed `pi-mcp-adapter` package (the one
+piece deliberately not hand-written — it's pure transport plumbing); configure
+servers in `~/.pi/agent/mcp.json`. See [SETUP.md](./SETUP.md).
+
 ## Setup
 
 See [SETUP.md](./SETUP.md). Short version: run `./install.sh`.

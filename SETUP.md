@@ -39,6 +39,30 @@ pi loads extensions in-process via jiti, so they run under whatever
 runtime launched pi (Node here). No build step — pi executes the
 TypeScript directly.
 
+## MCP servers
+
+MCP (external tool servers) is provided by the installed `pi-mcp-adapter`
+package rather than a hand-written extension — it's pure transport plumbing.
+Install it (also done by `install.sh`):
+
+```sh
+pi install npm:pi-mcp-adapter@2.11.0
+```
+
+Configure servers in `~/.pi/agent/mcp.json` (`cp mcp.json.example` there). The
+schema is the standard `mcpServers` object — the same servers work in Claude
+Code. Keep secrets out of the file with `${VAR}` interpolation (resolved from
+the environment / `~/.pi/agent/.env`); the real `mcp.json` is gitignored.
+
+By default the adapter exposes servers through a single lean proxy tool and
+discovers their tools on demand, so a server with dozens of tools doesn't flood
+the context. Use `directTools: ["a", "b"]` per server to register specific tools
+directly, or `excludeTools` to hide noisy ones.
+
+**Trust:** each configured server is the real trust decision — stdio servers run
+processes, remote servers make network calls. Add servers you trust, like any
+dependency.
+
 ## Development
 
 - `npm test` — vitest (pure-logic modules, the sandbox, arg builders).
