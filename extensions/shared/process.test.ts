@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { runCommand } from "./src/process.ts";
+import { runCommand } from "./process.ts";
 
 describe("runCommand", () => {
   it("captures stdout and exit code", async () => {

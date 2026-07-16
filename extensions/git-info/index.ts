@@ -10,8 +10,8 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { runCommand } from "../shared/process.ts";
 import { makeRefreshCoordinator } from "./src/coordinator.ts";
-import { runCommand } from "./src/process.ts";
 import {
   countChangedFiles,
   emptyGitInfoState,
