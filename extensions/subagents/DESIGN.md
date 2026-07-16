@@ -80,3 +80,13 @@ Decisions made with the user; build from this, don't relitigate.
 
 - Worktree isolation flag; claude/codex backends; structured output
   option; takeover UI; persistence across session switches.
+- **Dispose-on-settle by default (opt-in keep_alive).** Today children
+  stay alive after settling so subagent_send can resume them; only
+  cancel/LRU/shutdown dispose them. Most spawns are fire-and-forget, so
+  the better contract: dispose a child's session when it settles UNLESS
+  the spawn set keep_alive/resumable, making subagent_send opt-in. Frees
+  memory automatically (matters on a Pi) without relying on the model to
+  cancel. Not urgent — LRU (MAX_TRACKED) already bounds growth and
+  finished children don't hold MAX_WORKING slots. Self-destruct (child
+  kills itself) is rejected: dismissal is a parent decision and races
+  with follow-ups.

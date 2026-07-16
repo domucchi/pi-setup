@@ -63,7 +63,8 @@ export function buildSearchResult(query: string, results: SearchResult[]): strin
       lines.push(`   > ${clip(highlight.replace(/\s+/g, " ").trim(), 300)}`);
     }
     if (r.text) {
-      lines.push("", clip(r.text, 2_000));
+      // Already capped in search normalize; show it in full here.
+      lines.push("", r.text);
     }
     return lines.join("\n");
   });

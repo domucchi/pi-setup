@@ -1,13 +1,18 @@
+import { decodeBody } from "./charset.ts";
 import { extractFromHtml, isHtmlContentType } from "./extract.ts";
+import { assertPublicUrl, SsrfError, type Lookup } from "./ssrf.ts";
 
 const FETCH_TIMEOUT_MS = 20_000;
 const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
+const MAX_REDIRECTS = 5;
 const USER_AGENT =
   "Mozilla/5.0 (compatible; pi-web-access/1.0; +https://pi.dev)";
 
 export interface FetchResult {
   ok: boolean;
   url: string;
+  /** Final URL after redirects (differs from url when redirected). */
+  finalUrl?: string;
   title: string | null;
   contentType: string | null;
   /** Markdown (HTML pages) or raw text (other text types). */
@@ -15,7 +20,6 @@ export interface FetchResult {
   error?: string;
 }
 
-/** Injectable for tests; defaults to global fetch. */
 export type Fetcher = typeof fetch;
 
 function isTextContentType(contentType: string | null): boolean {
@@ -27,57 +31,93 @@ function isTextContentType(contentType: string | null): boolean {
 
 /**
  * Fetch a URL and return readable content: markdown for HTML, raw text
- * for other text types, and a clear error for binary/unsupported types
- * (e.g. PDFs) rather than dumping bytes. Never throws.
+ * for other text types, a clear error for binary/unsupported types.
+ * Redirects are followed manually (bounded) so each hop is SSRF-checked —
+ * `redirect: "follow"` would let a public URL bounce to an internal one.
+ * Never throws.
  */
 export async function fetchUrl(
   rawUrl: string,
-  deps: { fetcher?: Fetcher } = {},
+  deps: { fetcher?: Fetcher; lookup?: Lookup } = {},
 ): Promise<FetchResult> {
   const fetcher = deps.fetcher ?? fetch;
 
-  let url: URL;
+  let current: URL;
   try {
-    url = new URL(rawUrl);
+    current = new URL(rawUrl);
   } catch {
     return errorResult(rawUrl, "Invalid URL.");
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    return errorResult(rawUrl, "Only http and https URLs are supported.");
   }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const response = await fetcher(url, {
-      redirect: "follow",
-      signal: controller.signal,
-      headers: { "user-agent": USER_AGENT, accept: "text/html,*/*" },
-    });
-    if (!response.ok) {
-      return errorResult(url.href, `HTTP ${response.status} ${response.statusText}`);
-    }
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      if (current.protocol !== "http:" && current.protocol !== "https:") {
+        return errorResult(current.href, "Only http and https URLs are supported.");
+      }
+      try {
+        await assertPublicUrl(current, deps.lookup);
+      } catch (error) {
+        if (error instanceof SsrfError) return errorResult(current.href, error.message);
+        throw error;
+      }
 
-    const contentType = response.headers.get("content-type");
-    if (!isTextContentType(contentType)) {
-      return errorResult(
-        url.href,
-        `Unsupported content type "${contentType ?? "unknown"}" — this tool reads text and HTML pages, not binary files.`,
-      );
-    }
+      const response = await fetcher(current, {
+        redirect: "manual",
+        signal: controller.signal,
+        headers: { "user-agent": USER_AGENT, accept: "text/html,*/*" },
+      });
 
-    const raw = await readCapped(response);
-    if (isHtmlContentType(contentType)) {
-      const { title, markdown } = extractFromHtml(raw, url.href);
+      // Manual redirect handling: re-check every hop against the SSRF guard.
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get("location");
+        if (!location) {
+          return errorResult(current.href, `HTTP ${response.status} with no Location header.`);
+        }
+        try {
+          current = new URL(location, current);
+        } catch {
+          return errorResult(current.href, `Invalid redirect target "${location}".`);
+        }
+        continue;
+      }
+
+      if (!response.ok) {
+        return errorResult(current.href, `HTTP ${response.status} ${response.statusText}`);
+      }
+
+      const contentType = response.headers.get("content-type");
+      if (!isTextContentType(contentType)) {
+        return errorResult(
+          current.href,
+          `Unsupported content type "${contentType ?? "unknown"}" — this tool reads text and HTML pages, not binary files.`,
+        );
+      }
+
+      const bytes = await readCapped(response);
+      const finalUrl = response.url || current.href;
+      if (isHtmlContentType(contentType)) {
+        const { title, markdown } = extractFromHtml(decodeBody(bytes, contentType), finalUrl);
+        return {
+          ok: true,
+          url: rawUrl,
+          finalUrl,
+          title,
+          contentType,
+          content: markdown || "(no readable content extracted)",
+        };
+      }
       return {
         ok: true,
-        url: url.href,
-        title,
+        url: rawUrl,
+        finalUrl,
+        title: null,
         contentType,
-        content: markdown || "(no readable content extracted)",
+        content: decodeBody(bytes, contentType),
       };
     }
-    return { ok: true, url: url.href, title: null, contentType, content: raw };
+    return errorResult(rawUrl, `Too many redirects (>${MAX_REDIRECTS}).`);
   } catch (error) {
     const message =
       error instanceof Error && error.name === "AbortError"
@@ -85,31 +125,39 @@ export async function fetchUrl(
         : error instanceof Error
           ? error.message
           : String(error);
-    return errorResult(url.href, message);
+    return errorResult(current.href, message);
   } finally {
     clearTimeout(timer);
   }
 }
 
-/** Read the body but stop once we pass the byte budget. */
-async function readCapped(response: Response): Promise<string> {
+/** Read the body into a byte buffer, stopping once past the budget. */
+async function readCapped(response: Response): Promise<Uint8Array> {
   const body = response.body;
-  if (!body) return await response.text();
+  if (!body) return new Uint8Array(await response.arrayBuffer());
   const reader = body.getReader();
-  const decoder = new TextDecoder("utf-8");
-  let text = "";
+  const chunks: Uint8Array[] = [];
   let bytes = 0;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    bytes += value.byteLength;
-    text += decoder.decode(value, { stream: true });
-    if (bytes >= MAX_RESPONSE_BYTES) {
+    const remaining = MAX_RESPONSE_BYTES - bytes;
+    if (value.byteLength >= remaining) {
+      chunks.push(value.subarray(0, remaining));
       await reader.cancel().catch(() => {});
+      bytes += remaining;
       break;
     }
+    chunks.push(value);
+    bytes += value.byteLength;
   }
-  return text;
+  const out = new Uint8Array(bytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out;
 }
 
 function errorResult(url: string, error: string): FetchResult {

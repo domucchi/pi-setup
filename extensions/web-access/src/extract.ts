@@ -33,9 +33,28 @@ function rawText(html: string): string {
  * Readability (article view) first, falls back to a tag-stripped text
  * dump. Never throws — a parse failure yields an empty markdown string.
  */
+/** Rewrite relative href/src to absolute so links survive extraction. */
+function absolutizeLinks(document: ReturnType<typeof parseHTML>["document"], base: string) {
+  for (const [selector, attr] of [
+    ["a[href]", "href"],
+    ["img[src]", "src"],
+  ] as const) {
+    for (const el of document.querySelectorAll(selector)) {
+      const value = el.getAttribute(attr);
+      if (!value) continue;
+      try {
+        el.setAttribute(attr, new URL(value, base).href);
+      } catch {
+        // Leave unresolvable values as-is.
+      }
+    }
+  }
+}
+
 export function extractFromHtml(html: string, url?: string): Extracted {
   try {
     const { document } = parseHTML(html);
+    if (url) absolutizeLinks(document, url);
     const reader = new Readability(document as never);
     const article = reader.parse();
     if (article?.content) {

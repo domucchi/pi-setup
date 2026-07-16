@@ -12,8 +12,16 @@ describe("extractFromHtml", () => {
     const { title, markdown } = extractFromHtml(html, "https://x.com/post");
     expect(markdown).toContain("Real Heading");
     expect(markdown).toContain("First paragraph");
-    expect(markdown).toContain("[a link](https://x.com)");
+    expect(markdown).toContain("[a link](https://x.com/)");
     expect(title).toBeTruthy();
+  });
+
+  it("resolves relative links against the base URL", () => {
+    const html = `<html><body><article><h1>Docs</h1>
+      <p>See <a href="/guide/intro">the intro</a> and this ${"padding ".repeat(20)}.</p>
+      </article></body></html>`;
+    const { markdown } = extractFromHtml(html, "https://docs.example.com/v2/page");
+    expect(markdown).toContain("https://docs.example.com/guide/intro");
   });
 
   it("strips scripts and styles", () => {
