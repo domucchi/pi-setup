@@ -51,13 +51,13 @@ Setup: clone/symlink to `~/.pi/agent`, `npm install`.
 4. **file-search** — `fd` + `rg` as first-class tools. Mostly prompt.ts + output
    truncation (line/byte caps, full output saved to temp file, path returned).
    Guidelines steer model: fd for names, rg for contents, bash only for pipelines.
-5. **subagents** — in-process pi SDK children (`createAgentSession()`), **pi
-   backend only** (no claude/codex backends — 1KLOC of protocol defensiveness
-   for marginal value; revisit only on felt need). Tools: `subagent_spawn` /
-   `subagent_wait` / `subagent_check` / `subagent_cancel` / `subagent_list`.
-   `MAX_RUNNING=4` with synchronous reservation before first await. Normalized
-   event union → single snapshot fold. `/subagents` takeover UI last. Ephemeral
-   across session switches (v1).
+5. **subagents** — DESIGNED, see `extensions/subagents/DESIGN.md` (settled
+   2026-07-16): in-process pi SDK children, pi backend only; Claude Code-style
+   markdown agent files (`agents/*.md`, starters: explore/worker); interactive
+   via `subagent_send` (children stay alive after settling for follow-ups);
+   full-minus-denylist child tools (`subagent_*`, `workflow`, `ask_user`,
+   `bg_*`); MAX_RUNNING=4; result delivery reuses the bg-terminals deferred
+   followUp machinery; routing doctrine in skills/subagents/SKILL.md.
 6. **workflows** — last, only once subagent usage patterns are felt. Steal the
    sandbox design wholesale: separate Node child with `--permission`
    fs-read-only + `node:vm` context with codegen disabled + token-authenticated
