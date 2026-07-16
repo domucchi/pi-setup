@@ -58,13 +58,14 @@ Setup: clone/symlink to `~/.pi/agent`, `npm install`.
    full-minus-denylist child tools (`subagent_*`, `workflow`, `ask_user`,
    `bg_*`); MAX_RUNNING=4; result delivery reuses the bg-terminals deferred
    followUp machinery; routing doctrine in skills/subagents/SKILL.md.
-6. **workflows** — last, only once subagent usage patterns are felt. Steal the
-   sandbox design wholesale: separate Node child with `--permission`
-   fs-read-only + `node:vm` context with codegen disabled + token-authenticated
-   IPC with byte budgets + acorn-validated pure-literal `meta`. Persist runs to
-   `~/.pi/agent/workflows/<runId>/` (atomic writes); tool `details` carries
-   `runId` so forked sessions re-hydrate from disk. Pick our own trigger policy
-   for the tool description (reference repo gates on the word "ultracode").
+6. **workflows** — DESIGNED, see `extensions/workflows/DESIGN.md` (settled
+   2026-07-16): Claude Code-compatible DSL subset (agent/parallel/pipeline/
+   phase/log/args + schema, budget stubbed); triple-isolation sandbox from the
+   reference; agents reuse subagents' createChild with in-memory sessions;
+   blocking + background modes; audit-trail persistence with a journal.jsonl
+   architected for later resume; named workflows from .pi/workflows then
+   .claude/workflows; trigger = explicit user ask, model may propose via
+   ask_user.
 
 Later candidates (not committed): **ui-customization** (own the whole footer
 via `ctx.ui.setFooter(factory)` — receives TUI, theme, and FooterDataProvider
