@@ -20,6 +20,7 @@ import {
   buildCheckResult,
   buildCompletionMessage,
   buildListResult,
+  buildPickerLabel,
   buildSpawnResult,
   buildWaitResult,
   CANCEL_DESCRIPTION,
@@ -35,6 +36,7 @@ import {
   SPAWN_PROMPT_SNIPPET,
   WAIT_DESCRIPTION,
 } from "./prompt.ts";
+import { livePicker } from "../shared/live-picker.ts";
 import { loadAgentDefinitions } from "./src/agents.ts";
 import {
   createChild,
@@ -334,18 +336,15 @@ export default function subagents(pi: ExtensionAPI) {
     description: "Inspect subagents",
     handler: async (_args, ctx) => {
       for (;;) {
-        const snapshots = manager.list();
-        if (snapshots.length === 0) {
+        if (manager.list().length === 0) {
           ctx.ui.notify("No subagents", "info");
           return;
         }
-        const labels = snapshots.map(
-          (s) =>
-            `${s.id} ${s.status === "working" ? "◆" : s.status === "failed" ? "✗" : "✓"} ${describeStatus(s)} ${describeDuration(s.startedAt, s.settledAt)} · ${s.agentType} · ${s.title}`,
+        const picked = await livePicker(ctx, "Subagents:", () =>
+          manager.list().map(buildPickerLabel),
         );
-        const picked = await ctx.ui.select("Subagents:", labels);
         if (picked === undefined) return;
-        const snapshot = snapshots[labels.indexOf(picked)];
+        const snapshot = manager.list()[picked];
         if (!snapshot) return;
 
         await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {

@@ -31,6 +31,7 @@ import {
   buildStatusResult,
   describeOutcome,
 } from "./prompt.ts";
+import { livePicker } from "../shared/live-picker.ts";
 import {
   TerminalManager,
   type TerminalEntry,
@@ -231,15 +232,15 @@ export default function backgroundTerminals(pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       // Loop: picker → detail → back to picker, until Esc on the picker.
       for (;;) {
-        const entries = manager.list();
-        if (entries.length === 0) {
+        if (manager.list().length === 0) {
           ctx.ui.notify("No background terminals", "info");
           return;
         }
-        const labels = entries.map(buildPsLabel);
-        const picked = await ctx.ui.select("Background terminals:", labels);
+        const picked = await livePicker(ctx, "Background terminals:", () =>
+          manager.list().map(buildPsLabel),
+        );
         if (picked === undefined) return;
-        const entry = entries[labels.indexOf(picked)];
+        const entry = manager.list()[picked];
         if (!entry) return;
 
         await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
