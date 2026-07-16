@@ -16,6 +16,8 @@ rather than installed as a package.
   (`agents/*.md`), interactive `subagent_send`; `/subagents`.
 - **workflows** — model-authored orchestration scripts run in a
   sandboxed child; Claude Code-compatible DSL; `/workflows`.
+- **web-access** — `web_fetch` (keyless, local HTML→markdown) and
+  `web_search` (Exa; set `EXA_API_KEY`).
 
 ## Setup
 

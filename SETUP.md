@@ -24,6 +24,15 @@ any target that already exists as a real file.
   (GitLab) for the current branch, picking the CLI from the remote URL. It
   silently skips the lookup when the matching CLI is absent.
 
+## Web access
+
+`web_fetch` needs no setup — it fetches and extracts pages locally. `web_search`
+uses [Exa](https://exa.ai) (20k requests/month free tier). Provide `EXA_API_KEY`
+either as a shell/CI env var or in `~/.pi/agent/.env` (`cp .env.example` there and
+fill it in — that file lives outside the repo and is gitignored). Extensions read
+`process.env` first, then `~/.pi/agent/.env`. Without the key, `web_search`
+returns a hint and `web_fetch` still works.
+
 ## Extensions run under Node
 
 pi loads extensions in-process via jiti, so they run under whatever
