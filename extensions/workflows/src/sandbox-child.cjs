@@ -1,11 +1,20 @@
 "use strict";
 /**
  * Workflow sandbox child. Runs a model-authored script body inside a
- * node:vm context with code generation disabled, under Node's
- * --permission model (read-only fs limited to this directory, no net,
- * no child processes). Talks to the parent over token-authenticated
- * IPC only. Defense-in-depth: even a vm escape lands in a process that
- * can't write, spawn, or dial out.
+ * node:vm context under Node's --permission model (read-only fs limited
+ * to this directory, no fs writes, no child processes, no worker
+ * threads) with an empty environment. Talks to the parent over
+ * token-authenticated IPC only.
+ *
+ * Security model: node:vm is NOT a boundary on its own — injecting a
+ * host-realm function or object lets a script reach `x.constructor`
+ * (the host Function) and compile code in the host realm. So the
+ * context is given ZERO host-realm values: the entire DSL is built by a
+ * factory compiled *inside* the context, closing over a single host
+ * bridge that is never placed in the context globals. Combined with
+ * codeGeneration.strings:false (no in-context eval/Function) and the
+ * OS-level --permission + empty-env process sandbox, an escape has
+ * nothing host-realm to reach and nothing valuable to read.
  */
 
 const vm = require("node:vm");
@@ -16,9 +25,8 @@ const MAX_LOG_BYTES = 8 * 1024;
 
 let token = null;
 let finished = false;
-const pending = new Map(); // agent id -> resolve
 
-// Neuter process capabilities a hypothetical vm escape could reach.
+// Neuter process capabilities a hypothetical escape could reach.
 for (const key of ["getBuiltinModule", "binding", "dlopen", "kill", "abort"]) {
   try {
     Object.defineProperty(process, key, { value: undefined });
@@ -36,18 +44,16 @@ function finish(kind, payload) {
   if (finished) return;
   finished = true;
   send(Object.assign({ kind }, payload));
-  // Give the IPC channel a beat to flush, then exit regardless.
   setTimeout(() => process.exit(0), 50).unref();
-  process.disconnect && setTimeout(() => {
-    try {
-      process.disconnect();
-    } catch {}
-  }, 20).unref();
 }
 
 function fail(message) {
   finish("error", { message: String(message).slice(0, 8192) });
 }
+
+// --- agent bridge state (host realm; never exposed to the context) ----------
+
+const pendingCb = new Map(); // agent id -> context callback
 
 process.on("message", (message) => {
   if (!message || typeof message !== "object") return;
@@ -58,162 +64,186 @@ process.on("message", (message) => {
     }
     return;
   }
-  if (message.token !== token) return; // not ours — ignore
+  if (message.token !== token) return; // not ours
   if (message.kind === "agent-result") {
-    const resolve = pending.get(message.id);
-    if (resolve) {
-      pending.delete(message.id);
-      resolve(message);
+    const cb = pendingCb.get(message.id);
+    if (!cb) return;
+    pendingCb.delete(message.id);
+    const value = message.ok
+      ? message.structured !== undefined
+        ? message.structured
+        : message.output
+      : null;
+    let json;
+    try {
+      json = JSON.stringify(value === undefined ? null : value);
+    } catch {
+      json = "null";
     }
+    cb(Boolean(message.ok), json);
   }
 });
 
 process.on("disconnect", () => process.exit(1));
 
-function deepFreeze(value) {
-  if (value && typeof value === "object") {
-    for (const key of Object.getOwnPropertyNames(value)) {
-      deepFreeze(value[key]);
+// Bootstrap runs INSIDE the context. It receives the host bridge and the
+// args JSON string as arguments (captured in closure, never global) and
+// returns the DSL as context-native values for the host to install.
+const BOOTSTRAP = `(function (__host, __argsJson) {
+  const freeze = (v) => {
+    if (v && typeof v === "object") {
+      for (const k of Object.getOwnPropertyNames(v)) freeze(v[k]);
+      Object.freeze(v);
     }
-    Object.freeze(value);
+    return v;
+  };
+
+  // Determinism guards on the context-native Math/Date (breaks resume).
+  Math.random = function () {
+    throw new Error("Math.random() is unavailable in workflow scripts (breaks resume). Vary prompts by index instead.");
+  };
+  const NativeDate = Date;
+  NativeDate.now = function () {
+    throw new Error("Date.now() is unavailable in workflow scripts (breaks resume). Pass timestamps via args.");
+  };
+  class SafeDate extends NativeDate {
+    constructor(...a) {
+      if (a.length === 0) {
+        throw new Error("new Date() without arguments is unavailable in workflow scripts (breaks resume). Pass timestamps via args.");
+      }
+      super(...a);
+    }
   }
-  return value;
-}
+
+  const agent = function (prompt, opts) {
+    if (typeof prompt !== "string" || !prompt.trim()) {
+      return Promise.reject(new Error("agent() requires a non-empty prompt string."));
+    }
+    let argJson;
+    try {
+      argJson = JSON.stringify({ prompt: prompt, opts: opts && typeof opts === "object" ? opts : {} });
+    } catch (e) {
+      return Promise.reject(new Error("agent() opts must be JSON-serializable."));
+    }
+    return new Promise(function (resolve, reject) {
+      let id;
+      try {
+        id = __host("agent", argJson);
+      } catch (e) {
+        reject(new Error(String(e && e.message ? e.message : e)));
+        return;
+      }
+      __host("register", id, function (ok, resultJson) {
+        if (!ok) { resolve(null); return; }
+        try { resolve(JSON.parse(resultJson)); } catch (e) { resolve(null); }
+      });
+    });
+  };
+
+  const parallel = function (thunks) {
+    if (!Array.isArray(thunks)) throw new Error("parallel() takes an array of thunks.");
+    return Promise.all(thunks.map(function (thunk) {
+      return Promise.resolve().then(function () { return thunk(); }).catch(function () { return null; });
+    }));
+  };
+
+  const pipeline = function (items, ...stages) {
+    if (!Array.isArray(items)) throw new Error("pipeline() takes an array of items.");
+    return Promise.all(items.map(async function (item, index) {
+      let value = item;
+      for (const stage of stages) {
+        try { value = await stage(value, item, index); } catch (e) { return null; }
+      }
+      return value;
+    }));
+  };
+
+  const phase = function (title) { __host("phase", String(title)); };
+  const log = function (message) { __host("log", String(message)); };
+  const budget = freeze({ total: null, spent: function () { return 0; }, remaining: function () { return Infinity; } });
+  const workflow = function () { throw new Error("Nested workflow() is not supported in this runtime."); };
+  const args = freeze(__argsJson === undefined ? undefined : JSON.parse(__argsJson));
+
+  return { agent, parallel, pipeline, phase, log, budget, workflow, args, Date: SafeDate };
+})`;
 
 async function run(init) {
   const maxAgentCalls = init.maxAgentCalls || 32;
   let agentCalls = 0;
   let agentSeq = 0;
 
-  function agent(prompt, opts) {
-    if (typeof prompt !== "string" || !prompt.trim()) {
-      return Promise.reject(new Error("agent() requires a non-empty prompt string."));
+  // The ONLY host function the context can reach — kept in the factory's
+  // closure, never assigned to a context global.
+  function hostBridge(kind, a, b) {
+    if (kind === "phase") {
+      send({ kind: "phase", title: String(a).slice(0, 200) });
+      return;
     }
-    if (agentCalls >= maxAgentCalls) {
-      return Promise.reject(
-        new Error(`agent() call cap (${maxAgentCalls}) reached for this run.`),
-      );
+    if (kind === "log") {
+      send({ kind: "log", message: String(a).slice(0, MAX_LOG_BYTES) });
+      return;
     }
-    agentCalls += 1;
-    agentSeq += 1;
-    const id = agentSeq;
-    const cleanOpts = {};
-    if (opts && typeof opts === "object") {
-      for (const key of ["label", "phase", "model", "agentType", "effort", "thinking"]) {
-        if (typeof opts[key] === "string") cleanOpts[key] = opts[key];
+    if (kind === "register") {
+      pendingCb.set(a, b);
+      return;
+    }
+    if (kind === "agent") {
+      if (agentCalls >= maxAgentCalls) {
+        throw new Error(`agent() call cap (${maxAgentCalls}) reached for this run.`);
       }
-      if (opts.schema && typeof opts.schema === "object") {
-        cleanOpts.schema = JSON.parse(JSON.stringify(opts.schema));
+      let parsed;
+      try {
+        parsed = JSON.parse(a);
+      } catch {
+        throw new Error("agent() request was not serializable.");
       }
-    }
-    const payload = { kind: "agent", id, prompt, opts: cleanOpts };
-    if (JSON.stringify(payload).length > MAX_AGENT_MESSAGE_BYTES) {
-      return Promise.reject(new Error("agent() request exceeds the 512KB budget."));
-    }
-    return new Promise((resolve) => {
-      pending.set(id, (outcome) => {
-        if (outcome.ok) {
-          resolve(outcome.structured !== undefined ? outcome.structured : outcome.output);
-        } else {
-          // Failed agents resolve to null (Claude Code semantics) so
-          // scripts filter with .filter(Boolean) instead of try/catch.
-          resolve(null);
+      const opts = {};
+      if (parsed.opts && typeof parsed.opts === "object") {
+        for (const key of ["label", "phase", "model", "agentType", "effort", "thinking"]) {
+          if (typeof parsed.opts[key] === "string") opts[key] = parsed.opts[key];
         }
-      });
+        if (parsed.opts.schema && typeof parsed.opts.schema === "object") {
+          opts.schema = JSON.parse(JSON.stringify(parsed.opts.schema));
+        }
+      }
+      agentCalls += 1;
+      agentSeq += 1;
+      const id = agentSeq;
+      const payload = { kind: "agent", id, prompt: parsed.prompt, opts };
+      if (JSON.stringify(payload).length > MAX_AGENT_MESSAGE_BYTES) {
+        throw new Error("agent() request exceeds the 512KB budget.");
+      }
       send(payload);
-    });
-  }
-
-  async function parallel(thunks) {
-    if (!Array.isArray(thunks)) throw new Error("parallel() takes an array of thunks.");
-    return Promise.all(
-      thunks.map((thunk) =>
-        Promise.resolve()
-          .then(() => thunk())
-          .catch(() => null),
-      ),
-    );
-  }
-
-  async function pipeline(items, ...stages) {
-    if (!Array.isArray(items)) throw new Error("pipeline() takes an array of items.");
-    return Promise.all(
-      items.map(async (item, index) => {
-        let value = item;
-        for (const stage of stages) {
-          try {
-            value = await stage(value, item, index);
-          } catch {
-            return null;
-          }
-        }
-        return value;
-      }),
-    );
-  }
-
-  function phase(title) {
-    send({ kind: "phase", title: String(title).slice(0, 200) });
-  }
-
-  function log(message) {
-    send({ kind: "log", message: String(message).slice(0, MAX_LOG_BYTES) });
-  }
-
-  const budget = Object.freeze({
-    total: null,
-    spent: () => 0,
-    remaining: () => Infinity,
-  });
-
-  function workflow() {
-    throw new Error("Nested workflow() is not supported in this runtime.");
-  }
-
-  // Determinism guards — these would break future resume/replay.
-  const SafeMath = Object.create(Math);
-  SafeMath.random = () => {
-    throw new Error(
-      "Math.random() is unavailable in workflow scripts (breaks resume). Vary prompts by index instead.",
-    );
-  };
-  class SafeDate extends Date {
-    constructor(...args) {
-      if (args.length === 0) {
-        throw new Error(
-          "new Date() without arguments is unavailable in workflow scripts (breaks resume). Pass timestamps via args.",
-        );
-      }
-      super(...args);
-    }
-    static now() {
-      throw new Error(
-        "Date.now() is unavailable in workflow scripts (breaks resume). Pass timestamps via args.",
-      );
+      return id;
     }
   }
 
+  // Minimal global: no host-realm values. Node built-ins (Promise, JSON,
+  // Math, Date, Array, structuredClone…) are the context's own intrinsics.
   const sandbox = {
-    agent,
-    parallel,
-    pipeline,
-    phase,
-    log,
-    budget,
-    workflow,
-    args: deepFreeze(structuredClone(init.args ?? undefined)),
-    Math: SafeMath,
-    Date: SafeDate,
     console: undefined,
     process: undefined,
     require: undefined,
     module: undefined,
+    exports: undefined,
+    global: undefined,
     globalThis: undefined,
   };
-
   const context = vm.createContext(sandbox, {
     codeGeneration: { strings: false, wasm: false },
   });
+
+  let factory;
+  try {
+    factory = new vm.Script(BOOTSTRAP, { filename: "bootstrap.js" }).runInContext(context);
+  } catch (error) {
+    return fail(`Sandbox bootstrap failed: ${error.message}`);
+  }
+  const argsJson = init.args === undefined ? undefined : JSON.stringify(init.args);
+  const api = factory(hostBridge, argsJson);
+  // api.* are context-native (built by context code); installing them as
+  // context globals keeps them context-native.
+  Object.assign(sandbox, api);
 
   let script;
   try {
@@ -233,9 +263,9 @@ async function run(init) {
     return fail(error && error.stack ? error.stack : error);
   }
 
-  if (pending.size > 0) {
+  if (pendingCb.size > 0) {
     return fail(
-      `Script returned while ${pending.size} agent() call(s) were still running — await every agent() before returning.`,
+      `Script returned while ${pendingCb.size} agent() call(s) were still running — await every agent() before returning.`,
     );
   }
 

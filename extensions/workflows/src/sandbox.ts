@@ -85,7 +85,13 @@ export function runWorkflowSandbox(options: {
         "--stack-size=2048",
         CHILD_PATH,
       ],
-      { stdio: ["ignore", "ignore", "ignore", "ipc"] },
+      {
+        stdio: ["ignore", "ignore", "ignore", "ipc"],
+        // Empty environment: even a full VM escape sees no host secrets
+        // (API keys etc. live in the parent's env, not gated by
+        // --permission since the permission model does not cover env).
+        env: {},
+      },
     );
 
     const timers: ReturnType<typeof setTimeout>[] = [];
