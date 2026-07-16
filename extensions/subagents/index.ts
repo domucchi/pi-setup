@@ -1,0 +1,382 @@
+/**
+ * subagents — delegate self-contained tasks to in-process pi children.
+ *
+ * Design: extensions/subagents/DESIGN.md. Roles come from markdown agent
+ * files (agents/*.md, project .pi/agents trust-gated). Children keep
+ * their session alive after finishing so subagent_send can follow up
+ * with context intact. Results are delivered like background-terminal
+ * completions: immediately when idle, else on agent_settled.
+ */
+
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { Key, matchesKey, Text, truncateToWidth } from "@earendil-works/pi-tui";
+import { Type } from "typebox";
+import {
+  buildAgentTypeError,
+  buildCheckResult,
+  buildCompletionMessage,
+  buildListResult,
+  buildSpawnResult,
+  buildWaitResult,
+  CANCEL_DESCRIPTION,
+  CHECK_DESCRIPTION,
+  describeDuration,
+  describeStatus,
+  LIST_DESCRIPTION,
+  PARAMETER_DESCRIPTIONS,
+  SEND_DESCRIPTION,
+  SPAWN_DESCRIPTION,
+  SPAWN_PROMPT_GUIDELINES,
+  SPAWN_PROMPT_SNIPPET,
+  WAIT_DESCRIPTION,
+} from "./prompt.ts";
+import { loadAgentDefinitions } from "./src/agents.ts";
+import {
+  createChild,
+  resolveChildTrust,
+  resolveModel,
+} from "./src/child.ts";
+import {
+  SubagentManager,
+  type SubagentSnapshot,
+  type SubagentStatus,
+} from "./src/manager.ts";
+
+const RESULT_MESSAGE_TYPE = "subagent-result";
+
+interface CompletionDetails {
+  id: string;
+  title: string;
+  status: SubagentStatus;
+}
+
+export default function subagents(pi: ExtensionAPI) {
+  let currentCtx: ExtensionContext | undefined;
+  let lastWidgetCount = 0;
+  const pendingResults = new Map<string, SubagentSnapshot>();
+  /** Ids whose current settle is already reported through a tool result. */
+  const consumed = new Set<string>();
+
+  const updateWidget = (count: number) => {
+    if (!currentCtx || count === lastWidgetCount) return;
+    lastWidgetCount = count;
+    currentCtx.ui.setWidget(
+      "subagents",
+      count > 0
+        ? [` ◆ ${count} subagent${count === 1 ? "" : "s"} working · /subagents to inspect`]
+        : undefined,
+    );
+  };
+
+  const deliver = (snapshot: SubagentSnapshot) => {
+    pi.sendMessage(
+      {
+        customType: RESULT_MESSAGE_TYPE,
+        content: buildCompletionMessage(snapshot),
+        display: true,
+        details: {
+          id: snapshot.id,
+          title: snapshot.title,
+          status: snapshot.status,
+        } satisfies CompletionDetails,
+      },
+      { deliverAs: "followUp", triggerTurn: true },
+    );
+  };
+
+  const manager = new SubagentManager({
+    createChild: async (options) => {
+      const ctx = currentCtx;
+      if (!ctx) throw new Error("Subagents require an active session.");
+      const registry = ctx.modelRegistry;
+      if (!registry) throw new Error("Model registry unavailable.");
+
+      const projectTrusted = resolveChildTrust({
+        parentCwd: ctx.cwd,
+        childCwd: options.cwd,
+        parentTrusted: ctx.isProjectTrusted(),
+      });
+      const definitions = loadAgentDefinitions({
+        agentDir: getAgentDir(),
+        cwd: ctx.cwd,
+        projectTrusted: ctx.isProjectTrusted(),
+      });
+      const definition = definitions.get(options.agentType);
+      if (!definition) {
+        throw new Error(buildAgentTypeError(options.agentType, definitions));
+      }
+
+      return createChild({
+        cwd: options.cwd,
+        projectTrusted,
+        modelRegistry: registry,
+        model: resolveModel(
+          registry,
+          options.model ?? definition.model,
+          ctx.model,
+        ),
+        thinkingLevel: definition.thinking ?? undefined,
+        allowTools: definition.tools,
+        appendSystemPrompt: definition.systemPrompt,
+        sessionName: options.title,
+        onEvent: options.onEvent,
+      });
+    },
+    onWorkingCountChanged: updateWidget,
+    onRunSettled: (snapshot, consumedByWaiter) => {
+      if (consumedByWaiter || consumed.has(snapshot.id)) {
+        consumed.delete(snapshot.id);
+        return;
+      }
+      if (currentCtx?.isIdle()) {
+        deliver(snapshot);
+      } else {
+        pendingResults.set(snapshot.id, snapshot);
+      }
+    },
+  });
+
+  pi.on("session_start", (_event, ctx) => {
+    currentCtx = ctx;
+  });
+
+  pi.on("agent_settled", () => {
+    for (const snapshot of pendingResults.values()) deliver(snapshot);
+    pendingResults.clear();
+  });
+
+  pi.on("session_shutdown", async () => {
+    currentCtx = undefined;
+    pendingResults.clear();
+    await manager.disposeAll();
+  });
+
+  pi.registerMessageRenderer<CompletionDetails>(
+    RESULT_MESSAGE_TYPE,
+    (message, _options, theme) => {
+      const ok = message.details?.status === "idle";
+      const icon = ok ? theme.fg("success", "◆ ") : theme.fg("warning", "◆ ");
+      const text =
+        typeof message.content === "string"
+          ? message.content
+          : (message.content?.find((c) => c.type === "text") as
+              | { text: string }
+              | undefined)?.text ?? "";
+      return new Text(icon + theme.fg("text", text), 0, 0);
+    },
+  );
+
+  pi.registerTool({
+    name: "subagent_spawn",
+    label: "Spawn Subagent",
+    description: SPAWN_DESCRIPTION,
+    promptSnippet: SPAWN_PROMPT_SNIPPET,
+    promptGuidelines: SPAWN_PROMPT_GUIDELINES,
+    parameters: Type.Object({
+      prompt: Type.String({ description: PARAMETER_DESCRIPTIONS.prompt }),
+      title: Type.String({ description: PARAMETER_DESCRIPTIONS.title }),
+      agent_type: Type.Optional(
+        Type.String({ description: PARAMETER_DESCRIPTIONS.agentType }),
+      ),
+      model: Type.Optional(
+        Type.String({ description: PARAMETER_DESCRIPTIONS.model }),
+      ),
+      working_dir: Type.Optional(
+        Type.String({ description: PARAMETER_DESCRIPTIONS.workingDir }),
+      ),
+    }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      const snapshot = await manager.spawn({
+        prompt: params.prompt,
+        title: params.title,
+        agentType: params.agent_type ?? "worker",
+        model: params.model,
+        cwd: params.working_dir ?? ctx.cwd,
+      });
+      return {
+        content: [{ type: "text" as const, text: buildSpawnResult(snapshot) }],
+        details: {
+          id: snapshot.id,
+          title: snapshot.title,
+          agentType: snapshot.agentType,
+          sessionFile: snapshot.sessionFile,
+        },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "subagent_send",
+    label: "Message Subagent",
+    description: SEND_DESCRIPTION,
+    parameters: Type.Object({
+      id: Type.String({ description: PARAMETER_DESCRIPTIONS.sendId }),
+      message: Type.String({ description: PARAMETER_DESCRIPTIONS.sendMessage }),
+    }),
+    async execute(_id, params) {
+      const snapshot = await manager.send(params.id, params.message);
+      consumed.delete(params.id);
+      pendingResults.delete(params.id);
+      const mode =
+        snapshot.status === "working" ? "delivered to the running agent" : "started a new run";
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Message ${mode} on ${snapshot.id}. You will be notified when it settles.`,
+          },
+        ],
+        details: { id: snapshot.id, status: snapshot.status },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "subagent_wait",
+    label: "Wait for Subagents",
+    description: WAIT_DESCRIPTION,
+    parameters: Type.Object({
+      ids: Type.Array(Type.String(), {
+        minItems: 1,
+        maxItems: 16,
+        description: PARAMETER_DESCRIPTIONS.waitIds,
+      }),
+    }),
+    async execute(_id, params, _signal, onUpdate) {
+      onUpdate?.({
+        content: [
+          { type: "text" as const, text: `Waiting for ${params.ids.join(", ")}…` },
+        ],
+        details: {},
+      });
+      const snapshots = await manager.wait(params.ids);
+      for (const snapshot of snapshots) {
+        consumed.add(snapshot.id);
+        pendingResults.delete(snapshot.id);
+      }
+      return {
+        content: [{ type: "text" as const, text: buildWaitResult(snapshots) }],
+        details: { ids: params.ids },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "subagent_check",
+    label: "Check Subagent",
+    description: CHECK_DESCRIPTION,
+    parameters: Type.Object({
+      id: Type.String({ description: PARAMETER_DESCRIPTIONS.checkId }),
+    }),
+    async execute(_id, params) {
+      const snapshot = manager.get(params.id);
+      if (!snapshot) {
+        throw new Error(`No subagent "${params.id}". Use subagent_list to see all.`);
+      }
+      if (snapshot.status !== "working") {
+        consumed.add(snapshot.id);
+        pendingResults.delete(snapshot.id);
+      }
+      return {
+        content: [{ type: "text" as const, text: buildCheckResult(snapshot) }],
+        details: { id: snapshot.id, status: snapshot.status },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "subagent_cancel",
+    label: "Cancel Subagents",
+    description: CANCEL_DESCRIPTION,
+    parameters: Type.Object({
+      ids: Type.Array(Type.String(), {
+        minItems: 1,
+        description: PARAMETER_DESCRIPTIONS.cancelIds,
+      }),
+    }),
+    async execute(_id, params) {
+      for (const id of params.ids) {
+        consumed.add(id);
+        pendingResults.delete(id);
+      }
+      const snapshots = await manager.cancel(params.ids);
+      const text =
+        snapshots.length === 0
+          ? "No matching subagents."
+          : snapshots.map((s) => `${s.id}: ${describeStatus(s)}`).join("\n");
+      return {
+        content: [{ type: "text" as const, text }],
+        details: { ids: params.ids },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "subagent_list",
+    label: "List Subagents",
+    description: LIST_DESCRIPTION,
+    parameters: Type.Object({}),
+    async execute() {
+      const snapshots = manager.list();
+      return {
+        content: [{ type: "text" as const, text: buildListResult(snapshots) }],
+        details: { count: snapshots.length },
+      };
+    },
+  });
+
+  pi.registerCommand("subagents", {
+    description: "Inspect subagents",
+    handler: async (_args, ctx) => {
+      for (;;) {
+        const snapshots = manager.list();
+        if (snapshots.length === 0) {
+          ctx.ui.notify("No subagents", "info");
+          return;
+        }
+        const labels = snapshots.map(
+          (s) =>
+            `${s.id} ${s.status === "working" ? "◆" : s.status === "failed" ? "✗" : "✓"} ${describeStatus(s)} ${describeDuration(s.startedAt, s.settledAt)} · ${s.agentType} · ${s.title}`,
+        );
+        const picked = await ctx.ui.select("Subagents:", labels);
+        if (picked === undefined) return;
+        const snapshot = snapshots[labels.indexOf(picked)];
+        if (!snapshot) return;
+
+        await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
+          const interval = setInterval(() => tui.requestRender(), 1_000);
+          return {
+            render: (width: number) => {
+              const current = manager.get(snapshot.id) ?? snapshot;
+              const lines = [
+                `${current.id} (${current.agentType}) "${current.title}" — ${describeStatus(current)} after ${describeDuration(current.startedAt, current.settledAt)}, run ${current.runs}`,
+                ...(current.sessionFile ? [`session: ${current.sessionFile}`] : []),
+                "",
+                ...manager.transcriptTail(current.id, 20),
+              ];
+              const out = lines.map((line) => truncateToWidth(` ${line}`, width));
+              out.push("");
+              out.push(truncateToWidth(theme.fg("dim", " Esc back to list"), width));
+              return out;
+            },
+            invalidate: () => {},
+            handleInput: (data: string) => {
+              if (
+                matchesKey(data, Key.escape) ||
+                matchesKey(data, Key.enter) ||
+                data === "q"
+              ) {
+                done(undefined);
+              }
+            },
+            dispose: () => clearInterval(interval),
+          };
+        });
+      }
+    },
+  });
+}
