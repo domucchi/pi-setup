@@ -10,5 +10,6 @@ phase when a pattern repeats.
 
 - 2026-07-16: only openai-codex is authed; Grok / Gemini / Anthropic-API keys
   needed before the multi-provider roster means anything (phase 3 prereq).
-- 2026-07-16: APPEND_SYSTEM.md is hand-distilled from agentic-setup doctrine;
-  if it starts drifting, add a pi render target to agentic-setup instead.
+- 2026-07-16: no global system-prompt steering by design; if the same
+  correction keeps recurring across projects, revisit via an agentic-setup
+  render target rather than hand-written prompt files.

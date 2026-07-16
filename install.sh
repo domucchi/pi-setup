@@ -21,7 +21,6 @@ esac
 links() {
   printf '%s\t%s\n' "$repo_root/extensions" "$pi_home/extensions"
   printf '%s\t%s\n' "$repo_root/prompts" "$pi_home/prompts"
-  printf '%s\t%s\n' "$repo_root/APPEND_SYSTEM.md" "$pi_home/APPEND_SYSTEM.md"
   if [ -d "$skills_src" ]; then
     for skill in "$skills_src"/*/; do
       printf '%s\t%s\n' "${skill%/}" "$pi_home/skills/$(basename "$skill")"

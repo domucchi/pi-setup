@@ -9,9 +9,11 @@ only wires pi.
 
 - `extensions/` — vendored and custom pi extensions (policy in `extensions/README.md`)
 - `prompts/` — prompt templates, auto-discovered by pi
-- `APPEND_SYSTEM.md` — appended to pi's default system prompt
 - `install.sh` — symlinks everything into `~/.pi/agent`, including per-skill
   links from agentic-setup's `skills/`
+
+No system-prompt customization: pi's default prompt stays as-is (let the
+models cook); steering lives in project `AGENTS.md` files and skills.
 - `PLAN.md` — roadmap and principles
 
 ## Install

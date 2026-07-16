@@ -27,8 +27,9 @@ agentic-setup skills linked per-skill.
 
 ## Phase 1 — daily-drive baseline (in progress, 2026-07-16)
 
-- [x] Author `APPEND_SYSTEM.md` — five doctrine bullets, verified live (pi
-  quoted the verification rule back in a `-p` session).
+- [x] System prompt: keep pi's default untouched — steering lives in project
+  `AGENTS.md` and skills, not a global append. (An APPEND_SYSTEM.md was tried
+  and removed same day.)
 - [x] Settings: `enabledModels` roster gpt-5.6-sol / terra / luna (all of
   today's authed providers); Sol at high thinking stays default. Grok /
   Gemini / Anthropic-API join the roster when keys land (phase 3 prereq).

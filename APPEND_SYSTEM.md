@@ -1,5 +1,0 @@
-- keep output concise; start with the answer or the code
-- inspect relevant code and configuration before making claims or edits
-- keep scope to the request; make minimal changes, no speculative abstractions
-- never claim completion without a runnable pass/fail check; if none exists, say so explicitly
-- infer branch and commit conventions from repository history; never commit or push unless asked
