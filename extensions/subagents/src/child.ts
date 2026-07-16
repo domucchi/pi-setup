@@ -182,6 +182,10 @@ export interface CreateChildOptions {
   thinkingLevel: string | undefined;
   allowTools?: string[];
   appendSystemPrompt?: string;
+  /** Extra tools for this child (e.g. a structured-output reporter). */
+  customTools?: ToolDefinition[];
+  /** In-memory session — no file in /resume (workflow agents). */
+  inMemorySession?: boolean;
   sessionName: string;
   onEvent: (event: ChildEvent) => void;
 }
@@ -221,12 +225,15 @@ export async function createChild(options: CreateChildOptions): Promise<ChildHan
 
   const { session } = await createAgentSession({
     cwd: options.cwd,
-    sessionManager: SessionManager.create(options.cwd),
+    sessionManager: options.inMemorySession
+      ? SessionManager.inMemory(options.cwd)
+      : SessionManager.create(options.cwd),
     settingsManager,
     resourceLoader: loader,
     model: options.model as never,
     thinkingLevel: options.thinkingLevel as never,
     excludeTools: childExcludedTools(),
+    ...(options.customTools ? { customTools: options.customTools } : {}),
   });
 
   try {
