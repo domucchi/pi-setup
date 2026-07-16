@@ -73,7 +73,9 @@ export function describeStatus(snapshot: SubagentSnapshot) {
 export function describeDuration(startedAt: number, settledAt: number | null) {
   const ms = (settledAt ?? Date.now()) - startedAt;
   if (ms < 60_000) return `${Math.round(ms / 1_000)}s`;
-  return `${Math.round(ms / 60_000)}min`;
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.round((ms % 60_000) / 1_000);
+  return seconds > 0 ? `${minutes}min ${seconds}s` : `${minutes}min`;
 }
 
 function clip(text: string, maxChars: number) {

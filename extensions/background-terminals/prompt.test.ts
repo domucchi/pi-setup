@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPsDetailLines, buildPsLabel } from "./prompt.ts";
+import { buildPsDetailLines, buildPsLabel, describeDuration } from "./prompt.ts";
 import { OutputBuffer } from "./src/output.ts";
 import type { TerminalEntry } from "./src/manager.ts";
 
@@ -22,6 +22,16 @@ function entry(overrides: Partial<TerminalEntry> = {}): TerminalEntry {
     ...overrides,
   };
 }
+
+describe("describeDuration", () => {
+  it("shows ms, seconds, and minutes with seconds", () => {
+    const t = 1_000_000;
+    expect(describeDuration(t, t + 500)).toBe("500ms");
+    expect(describeDuration(t, t + 42_000)).toBe("42s");
+    expect(describeDuration(t, t + 83_000)).toBe("1min 23s");
+    expect(describeDuration(t, t + 120_000)).toBe("2min");
+  });
+});
 
 describe("buildPsLabel", () => {
   it("shows id, state, title, and the command", () => {
