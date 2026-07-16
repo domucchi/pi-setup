@@ -11,9 +11,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { runCommand } from "../shared/process.ts";
-import { loadForgeConfig, type ForgeConfig } from "./src/config.ts";
 import { makeRefreshCoordinator } from "./src/coordinator.ts";
 import { lookupChange } from "./src/lookup.ts";
 import {
@@ -31,7 +29,6 @@ export default function gitInfo(pi: ExtensionAPI) {
   let generation = 0;
   let queriedPrBranch: string | null = null;
   let pollTimer: ReturnType<typeof setInterval> | undefined;
-  let forgeConfig: ForgeConfig = { githubHosts: [], gitlabHosts: [] };
   const coordinator = makeRefreshCoordinator();
 
   const publish = (ctx: ExtensionContext) => {
@@ -101,16 +98,13 @@ export default function gitInfo(pi: ExtensionAPI) {
 
     if (forcePullRequest || branchChanged) {
       queriedPrBranch = branchName;
-      const pullRequest = await lookupChange(
-        branchName,
-        (command, args) =>
-          runCommand(
-            command,
-            args,
-            ctx.cwd,
-            command === "git" ? GIT_TIMEOUT_MS : FORGE_TIMEOUT_MS,
-          ),
-        forgeConfig,
+      const pullRequest = await lookupChange(branchName, (command, args) =>
+        runCommand(
+          command,
+          args,
+          ctx.cwd,
+          command === "git" ? GIT_TIMEOUT_MS : FORGE_TIMEOUT_MS,
+        ),
       );
       if (refreshGeneration !== generation) return;
       state = { ...state, pullRequest };
@@ -132,7 +126,6 @@ export default function gitInfo(pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     generation += 1;
     queriedPrBranch = null;
-    forgeConfig = loadForgeConfig(getAgentDir());
     if (pollTimer) clearInterval(pollTimer);
 
     await refresh(ctx);

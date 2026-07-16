@@ -9,24 +9,9 @@ describe("detectForge", () => {
     expect(detectForge("git@gitlab.example.com:g/p.git")).toBe("gitlab");
   });
 
-  it("returns null for unrecognizable hosts", () => {
+  it("returns null for unrecognizable hosts (caller falls back to trying both)", () => {
     expect(detectForge("git@git.mycompany.io:g/p.git")).toBeNull();
     expect(detectForge("")).toBeNull();
-  });
-
-  it("routes configured self-hosted hosts, ahead of the built-in match", () => {
-    const config = {
-      gitlabHosts: ["git.example.com"],
-      githubHosts: ["ghe.corp"],
-    };
-    expect(detectForge("git@git.example.com:team/app.git", config)).toBe(
-      "gitlab",
-    );
-    expect(detectForge("https://ghe.corp/team/app.git", config)).toBe("github");
-    // A configured gitlab host wins even if "github" appears elsewhere.
-    expect(
-      detectForge("git@git.example.com:github-mirror/app.git", config),
-    ).toBe("gitlab");
   });
 });
 

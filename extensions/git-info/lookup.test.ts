@@ -95,16 +95,14 @@ describe("lookupChange", () => {
     expect(run).toHaveBeenCalledTimes(3); // git, then both CLIs (unknown forge)
   });
 
-  it("routes a configured self-hosted host straight to glab", async () => {
+  it("falls back to glab for an unrecognized self-hosted host", async () => {
     const run = runner({
       git: ok("git@git.example.com:team/app.git"),
+      gh: fail(), // installed, not this forge
       glab: ok(GL_MR),
     });
-    const result = await lookupChange("feat", run, {
-      gitlabHosts: ["git.example.com"],
-      githubHosts: [],
-    });
+    const result = await lookupChange("feat", run);
     expect(result?.kind).toBe("mr");
-    expect(run).toHaveBeenCalledTimes(2); // git + glab only, no gh probe
+    expect(run).toHaveBeenCalledTimes(3); // git, gh probe, then glab
   });
 });

@@ -1,5 +1,4 @@
 import type { CommandResult } from "../../shared/process.ts";
-import type { ForgeConfig } from "./config.ts";
 import { detectForge, forgeLookupCommand, type Forge } from "./forge.ts";
 import {
   parseGitHubPrJson,
@@ -26,11 +25,9 @@ export type CommandRunner = (
 export async function lookupChange(
   branch: string,
   run: CommandRunner,
-  config?: ForgeConfig,
 ): Promise<PullRequestInfo | null> {
   const remote = await run("git", ["remote", "get-url", "origin"]);
-  const forge =
-    remote.code === 0 ? detectForge(remote.stdout.trim(), config) : null;
+  const forge = remote.code === 0 ? detectForge(remote.stdout.trim()) : null;
   const candidates: Forge[] = forge ? [forge] : ["github", "gitlab"];
 
   for (const candidate of candidates) {
