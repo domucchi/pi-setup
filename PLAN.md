@@ -94,6 +94,12 @@ diagnostics (`pi-lens` is an acceptable install — pure plumbing).
   usage, not the cumulative aggregate (pins at 100%).
 - **prompt.ts as first-class module**: all model-facing text in one reviewable
   file per extension; guidelines phrased as tool-routing rules.
+- **prompt.ts vs skill**: guidelines are always-on (cost tokens every request)
+  — short routing rules only. Skills cost one description line until loaded —
+  long, procedural, or often-edited content (e.g. subagent model roster /
+  routing doctrine goes in skills/subagents/SKILL.md, not prompt.ts; tool
+  mechanics stay in prompt.ts). Don't put always-on-worthy one-liners behind a
+  skill (reference's background-terminals skill made that mistake).
 - **Lifecycle hygiene**: every resource registered in a disposables list
   drained on `session_shutdown`; session switch (`/new`/`/fork`/`/resume`)
   reloads extensions — captured objects go stale.
