@@ -27,6 +27,9 @@ import { buildFdArgs, buildRgArgs } from "./src/args.ts";
 import { capOutput } from "./src/cap.ts";
 
 const SEARCH_TIMEOUT_MS = 30_000;
+// Stop a search after ~4MB of stdout — well above the 50KB shown to the
+// model, but bounded so a runaway pattern can't exhaust memory.
+const PROCESS_STDOUT_BUDGET = 4 * 1024 * 1024;
 let overflowCounter = 0;
 
 function saveOverflow(tool: string, full: string) {
@@ -44,7 +47,11 @@ async function runSearch(
   cwd: string,
   emptyMessage: string,
 ) {
-  const result = await runCommand(binary, args, cwd, SEARCH_TIMEOUT_MS);
+  // Bound memory: stop the search once stdout passes the byte budget
+  // (rg --max-count is per-file, so a broad pattern can still flood).
+  const result = await runCommand(binary, args, cwd, SEARCH_TIMEOUT_MS, {
+    maxStdoutBytes: PROCESS_STDOUT_BUDGET,
+  });
   if (result.code === -1) {
     throw new Error(`${binary} timed out after ${SEARCH_TIMEOUT_MS / 1000}s. Narrow the search.`);
   }
@@ -55,7 +62,7 @@ async function runSearch(
   if (result.code === 1 && binary === "rg" && !result.stdout) {
     return { text: emptyMessage, matches: 0 };
   }
-  if (result.code !== 0 && !(binary === "rg" && result.code === 1)) {
+  if (result.code !== 0 && !result.truncated && !(binary === "rg" && result.code === 1)) {
     throw new Error(
       `${binary} failed (exit ${result.code}): ${result.stderr.trim() || "unknown error"}`,
     );
@@ -65,9 +72,12 @@ async function runSearch(
 
   const capped = capOutput(full);
   let text = capped.text;
-  if (capped.truncated) {
+  if (capped.truncated || result.truncated) {
     const file = saveOverflow(binary, full);
-    text += `\n\n[output capped at ${text.split("\n").length} of ${capped.totalLines} lines — complete output saved to ${file}]`;
+    const suffix = result.truncated
+      ? ` — search stopped early at the ${Math.round(PROCESS_STDOUT_BUDGET / 1024)}KB budget; narrow the pattern`
+      : "";
+    text += `\n\n[output capped at ${text.split("\n").length} of ${capped.totalLines}+ lines${suffix} — partial output saved to ${file}]`;
   }
   return { text, matches: capped.totalLines };
 }

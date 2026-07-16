@@ -104,10 +104,12 @@ export default function subagents(pi: ExtensionAPI) {
         childCwd: options.cwd,
         parentTrusted: ctx.isProjectTrusted(),
       });
+      // Load roles from the CHILD's cwd with the child's resolved trust —
+      // a child pointed at another project must see that project's roles.
       const definitions = loadAgentDefinitions({
         agentDir: getAgentDir(),
-        cwd: ctx.cwd,
-        projectTrusted: ctx.isProjectTrusted(),
+        cwd: options.cwd,
+        projectTrusted,
       });
       const definition = definitions.get(options.agentType);
       if (!definition) {
@@ -123,7 +125,10 @@ export default function subagents(pi: ExtensionAPI) {
           options.model ?? definition.model,
           ctx.model,
         ),
-        thinkingLevel: definition.thinking ?? undefined,
+        // Inherit the parent's thinking level unless the role or spawn
+        // overrides it (documented in skills/subagents/SKILL.md).
+        thinkingLevel:
+          options.thinking ?? definition.thinking ?? pi.getThinkingLevel(),
         allowTools: definition.tools,
         appendSystemPrompt: definition.systemPrompt,
         sessionName: options.title,
@@ -189,6 +194,9 @@ export default function subagents(pi: ExtensionAPI) {
       model: Type.Optional(
         Type.String({ description: PARAMETER_DESCRIPTIONS.model }),
       ),
+      reasoning_effort: Type.Optional(
+        Type.String({ description: PARAMETER_DESCRIPTIONS.reasoningEffort }),
+      ),
       working_dir: Type.Optional(
         Type.String({ description: PARAMETER_DESCRIPTIONS.workingDir }),
       ),
@@ -199,6 +207,7 @@ export default function subagents(pi: ExtensionAPI) {
         title: params.title,
         agentType: params.agent_type ?? "worker",
         model: params.model,
+        thinking: params.reasoning_effort,
         cwd: params.working_dir ?? ctx.cwd,
       });
       return {

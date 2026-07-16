@@ -9,7 +9,25 @@ describe("runCommand", () => {
       process.cwd(),
       5_000,
     );
-    expect(result).toEqual({ code: 0, stdout: "hello", stderr: "" });
+    expect(result).toEqual({
+      code: 0,
+      stdout: "hello",
+      stderr: "",
+      truncated: false,
+    });
+  });
+
+  it("stops and marks truncated when stdout exceeds the byte budget", async () => {
+    const result = await runCommand(
+      process.execPath,
+      ["-e", "setInterval(() => process.stdout.write('x'.repeat(1000)), 1)"],
+      process.cwd(),
+      5_000,
+      { maxStdoutBytes: 5_000 },
+    );
+    expect(result.truncated).toBe(true);
+    expect(result.stdout.length).toBeGreaterThanOrEqual(5_000);
+    expect(result.stdout.length).toBeLessThan(1_000_000);
   });
 
   it("captures stderr and nonzero exit codes", async () => {

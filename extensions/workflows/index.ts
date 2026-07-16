@@ -118,10 +118,11 @@ export default function workflows(pi: ExtensionAPI) {
     args: unknown;
     ctx: ExtensionContext;
     signal: AbortSignal | undefined;
+    runId?: string;
     onProgress?: (text: string) => void;
   }): Promise<{ record: RunRecord; result: SandboxResult; dir: string }> {
     const { meta, body } = extractMeta(options.source);
-    const runId = newRunId();
+    const runId = options.runId ?? newRunId();
     const store = createRunStore(runId);
     const abort = new AbortController();
     if (options.signal) {
@@ -180,6 +181,15 @@ export default function workflows(pi: ExtensionAPI) {
             agent.durationMs = event.durationMs;
           }
           const hashes = requestMeta.get(event.seq);
+          // Persist the full outcome so a future resume can replay this
+          // agent() call without re-running it; journal references it.
+          const resultRef = store.saveAgentResult({
+            seq: event.seq,
+            ok: event.ok ?? false,
+            output: event.output,
+            structured: event.structured,
+            error: event.error,
+          });
           store.appendJournal({
             seq: event.seq,
             promptHash: hashes?.promptHash ?? "",
@@ -188,6 +198,8 @@ export default function workflows(pi: ExtensionAPI) {
             phase: event.phase,
             ok: event.ok ?? false,
             error: event.error,
+            outputHead: event.output?.slice(0, 200),
+            resultRef,
           });
         }
         updateWidget();
@@ -266,13 +278,16 @@ export default function workflows(pi: ExtensionAPI) {
       }
 
       if (params.background) {
-        // Validate meta before promising anything.
+        // Validate meta and allocate the runId BEFORE detaching, so the
+        // tool result can return it immediately (per DESIGN.md).
         const { meta } = extractMeta(source!);
+        const runId = newRunId();
         void executeRun({
           source: source!,
           args: params.args,
           ctx,
           signal: undefined,
+          runId,
         }).then(({ record, result, dir }) => {
           const text = buildRunResult(record, result.ok ? result.value : undefined, dir);
           if (currentCtx?.isIdle()) {
@@ -288,10 +303,10 @@ export default function workflows(pi: ExtensionAPI) {
           content: [
             {
               type: "text" as const,
-              text: `Workflow "${meta.name}" started in the background. You will be notified with the result; /workflows shows progress.`,
+              text: `Workflow "${meta.name}" started in the background as ${runId}. You will be notified with the result; /workflows ${runId} shows progress.`,
             },
           ],
-          details: {},
+          details: { runId, status: "running" },
         };
       }
 

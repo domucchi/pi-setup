@@ -29,6 +29,9 @@ export interface RunnerEvent {
   ok?: boolean;
   error?: string;
   durationMs?: number;
+  /** Settled only — the agent's return value, for the resume journal. */
+  output?: string;
+  structured?: unknown;
 }
 
 export interface RunnerContext {
@@ -191,6 +194,8 @@ export function createAgentRunner(options: {
           state: "settled",
           ok: true,
           durationMs,
+          output: outcome.finalText,
+          structured,
         });
         return { ok: true, output: outcome.finalText, structured };
       }

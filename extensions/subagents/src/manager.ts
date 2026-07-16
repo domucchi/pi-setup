@@ -37,6 +37,7 @@ export interface SpawnOptions {
   prompt: string;
   cwd: string;
   model?: string;
+  thinking?: string;
 }
 
 export interface ManagerHooks {

@@ -47,6 +47,8 @@ export const PARAMETER_DESCRIPTIONS = {
     "Named role from agents/*.md (e.g. 'explore' for read-only scouting, 'worker' for full-tool work). Defaults to worker.",
   model:
     "Model override: 'provider/model-id', or a bare id when unambiguous. Defaults to inheriting this session's model.",
+  reasoningEffort:
+    "Thinking level: off, minimal, low, medium, high, xhigh, or max. Defaults to inheriting this session's level.",
   workingDir: "Working directory. Defaults to the current project directory.",
   sendId: "Id of the subagent to message.",
   sendMessage: "The follow-up instruction or feedback.",

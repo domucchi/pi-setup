@@ -306,13 +306,16 @@ export async function createChild(options: CreateChildOptions): Promise<ChildHan
     if (state.closed) return;
     switch (event.type) {
       case "agent_start":
+        // Do NOT clear the watchdog here — agent_start fires before any
+        // provider response, so clearing it would defeat the first-
+        // response guard. It clears only on real output below.
         guard.apply(session); // tools may register between runs
-        clearWatchdog();
         break;
       case "message_update":
         clearWatchdog();
         break;
       case "tool_execution_start":
+        clearWatchdog(); // a tool call is a real first response
         emit({ type: "activity", preview: `→ ${event.toolName}` });
         break;
       case "tool_execution_end":

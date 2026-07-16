@@ -24,7 +24,11 @@ export interface RunRecord {
   error?: string;
 }
 
-/** Journal entry per agent() call — the future resume cache key+value. */
+/**
+ * Journal entry per agent() call — the resume cache key (seq + hashes)
+ * plus a reference to the full recorded value (resultRef → agents/<seq>.json).
+ * Replay serves resultRef for a matching (seq, promptHash, optsHash).
+ */
 export interface JournalEntry {
   seq: number;
   promptHash: string;
@@ -34,6 +38,16 @@ export interface JournalEntry {
   ok: boolean;
   error?: string;
   outputHead?: string;
+  resultRef?: string;
+}
+
+/** Full recorded outcome of one agent() call, keyed by seq for replay. */
+export interface AgentResultArtifact {
+  seq: number;
+  ok: boolean;
+  output?: string;
+  structured?: unknown;
+  error?: string;
 }
 
 export function workflowsRoot() {
@@ -63,12 +77,15 @@ export interface RunStore {
   saveInputs(source: string, args: unknown, meta: WorkflowMeta): void;
   saveStatus(record: RunRecord): void;
   saveResult(value: unknown): void;
+  /** Persist one agent's full outcome; returns the journal resultRef. */
+  saveAgentResult(artifact: AgentResultArtifact): string;
   appendJournal(entry: JournalEntry): void;
 }
 
 export function createRunStore(runId: string): RunStore {
   const dir = path.join(workflowsRoot(), runId);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const agentsDir = path.join(dir, "agents");
   return {
     dir,
     saveInputs(source, args, meta) {
@@ -87,6 +104,12 @@ export function createRunStore(runId: string): RunStore {
         text = JSON.stringify(String(value));
       }
       writeFileAtomic(path.join(dir, "result.json"), text);
+    },
+    saveAgentResult(artifact) {
+      mkdirSync(agentsDir, { recursive: true, mode: 0o700 });
+      const rel = path.join("agents", `${artifact.seq}.json`);
+      writeFileAtomic(path.join(dir, rel), JSON.stringify(artifact, null, 2));
+      return rel;
     },
     appendJournal(entry) {
       appendFileSync(path.join(dir, "journal.jsonl"), `${JSON.stringify(entry)}\n`);
