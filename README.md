@@ -7,7 +7,7 @@ only wires pi.
 
 ## Layout
 
-- `extensions/` — vendored and custom pi extensions (policy in `extensions/README.md`)
+- `extensions/` — custom (self-written) pi extensions only (see `extensions/README.md`)
 - `prompts/` — prompt templates, auto-discovered by pi
 - `install.sh` — symlinks everything into `~/.pi/agent`, including per-skill
   links from agentic-setup's `skills/`
@@ -26,3 +26,19 @@ models cook); steering lives in project `AGENTS.md` files and skills.
 
 Machine-local state (`~/.pi/agent/settings.json`, `auth.json`, `sessions/`)
 stays out of this repo and is never symlinked — same rule as `~/.zshrc.local`.
+
+## Third-party extensions
+
+Installed via pi's package manager, reviewed before install, replayed by hand
+on a new machine:
+
+```sh
+pi install npm:@quintinshaw/pi-dynamic-workflows   # workflows, subagents, model tiers
+```
+
+Model tiers for workflow subagents live in `~/.pi/workflows/model-tiers.json`
+(machine-local; edit there or via `/workflows-models`).
+
+NOTE: pi must be installed via plain npm (`npm i -g
+@earendil-works/pi-coding-agent`), NOT `vp install` — extensions cannot load
+under vite-plus's versioned package layout (see FRICTION.md 2026-07-16).

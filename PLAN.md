@@ -7,11 +7,12 @@ something used for actual work, with a runnable check.
 
 ## Principles
 
-- **Adopt before build.** Fork existing extensions; write from scratch only
+- **Adopt before build.** Use existing extensions; write from scratch only
   when nothing exists.
-- **Vendor everything.** All third-party extensions live in `extensions/` with
-  an `UPSTREAM.md`; `pi install`/`pi update` are not used. Updates arrive as
-  reviewable diffs (see `extensions/README.md`).
+- **Third-party via `pi install`, custom in `extensions/`.** Review source
+  before installing; the install list is replayed from README on new machines.
+  (Vendor-everything was tried 2026-07-16 and abandoned — extensions importing
+  pi's API only load reliably through pi's own package mechanism.)
 - **Stay on the extension surface.** Never fork pi core. Pin the pi version
   within a phase; update deliberately and re-run checks after.
 - **Anthropic models enter pi via API key only.** Claude subscription stays in
@@ -48,28 +49,23 @@ Decide before subagents multiply the blast radius:
 - containerized runs (colima) for unattended / high-autonomy sessions.
 - Exit: a written rule in this repo for what may run unsandboxed.
 
-## Phase 3 — workflows + model routing
+## Phase 3 — workflows + model routing (in progress, 2026-07-16)
 
-- Vendor QuintinShaw/pi-dynamic-workflows into `extensions/` (use as-is,
-  `UPSTREAM.md` with commit).
-- First vendored extension → write `bin/check-updates.sh` alongside it and
-  verify it detects/pulls an upstream bump.
-- Map `~/.pi/workflows/model-tiers.json` onto the routing table so
-  orchestration effort levels pick the intended providers/models.
-- Exit: one real multi-agent workflow (e.g. adversarial review of an actual
-  branch) run end-to-end, cross-provider, with sensible cost.
+- [x] Security review of pi-dynamic-workflows v2.14.0 @ 7800cbd (agent sweep:
+  safe; treat the `workflow` tool as bash-equivalent trust; persisted runs
+  auto-resume — whatever is in `~/.pi/workflows` runs).
+- [x] Installed via `pi install npm:@quintinshaw/pi-dynamic-workflows`;
+  verified loading (required reinstalling pi itself via npm — see FRICTION).
+- [x] `~/.pi/workflows/model-tiers.json`: small=luna:low, medium=terra:medium,
+  big=sol:high. xai (Grok) is authed too — swap into a tier when wanted.
+- [ ] Exit: one real multi-agent workflow (e.g. adversarial review of an
+  actual branch) run end-to-end with sensible cost.
 
-## Phase 4 — dedicated subagents (only if still needed)
+## Phase 4 — dedicated subagents: NOT NEEDED (2026-07-16)
 
-dynamic-workflows already spawns model-routed subagents; after phase 3,
-evaluate whether interactive Claude Code-style delegation (named agent types,
-mid-run steering) still has a gap.
-
-- If yes: vendor-fork tintinweb/pi-subagents into `extensions/subagents/`
-  (UPSTREAM.md with commit), add per-agent-type provider/model matrix
-  (fable→sol, sol→grok, …).
-- Exit: a cross-provider subagent completes a bounded real task with a
-  runnable check.
+dynamic-workflows covers it: named agent types via `.pi/agents/*.md` (project)
+and `~/.pi/agent/agents/*.md` (global) with per-agent model/tier routing, plus
+scripted fan-out. Revisit only if interactive mid-run steering is missed.
 
 ## Phase 5 — usage telemetry
 
