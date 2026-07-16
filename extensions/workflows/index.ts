@@ -13,8 +13,10 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { liveDetailView } from "../shared/live-detail.ts";
 import { livePicker } from "../shared/live-picker.ts";
 import {
+  buildRunDetailLines,
   buildRunResult,
   describeRun,
   PARAMETER_DESCRIPTIONS,
@@ -316,43 +318,39 @@ export default function workflows(pi: ExtensionAPI) {
   pi.registerCommand("workflows", {
     description: "Inspect workflow runs",
     handler: async (_args, ctx) => {
-      const rows = () => {
+      // Same picker → detail → back loop as /subagents and /ps.
+      const combined = () => {
         const active = [...activeRuns.values()].map((run) => run.record);
         const activeIds = new Set(active.map((r) => r.runId));
-        const disk = listRunsFromDisk(activeIds).filter((r) => !activeIds.has(r.runId));
-        return [...active, ...disk].map(describeRun);
-      };
-      if (rows().length === 0) {
-        ctx.ui.notify("No workflow runs", "info");
-        return;
-      }
-      const picked = await livePicker(ctx, "Workflow runs:", rows);
-      if (picked === undefined) return;
-      const active = [...activeRuns.values()];
-      const run = active[picked];
-      if (run) {
-        const agents = [...run.agents.values()]
-          .map(
-            (a) =>
-              `${a.state === "running" ? "◆" : a.state === "ok" ? "✓" : "✗"} ${a.label}${a.phase ? ` [${a.phase}]` : ""}${a.durationMs ? ` ${Math.round(a.durationMs / 1000)}s` : ""}${a.error ? ` — ${a.error.slice(0, 80)}` : ""}`,
-          )
-          .join("\n");
-        ctx.ui.notify(
-          `${describeRun(run.record)}\n${agents}\nArtifacts: ${run.dir}`,
-          "info",
-        );
-      } else {
-        const activeIds = new Set(active.map((r) => r.record.runId));
         const disk = listRunsFromDisk(activeIds).filter(
           (r) => !activeIds.has(r.runId),
         );
-        const record = disk[picked - active.length];
-        if (record) {
-          ctx.ui.notify(
-            `${describeRun(record)}\nArtifacts: ~/.pi/agent/workflows/${record.runId}`,
-            "info",
-          );
+        return [...active, ...disk];
+      };
+      for (;;) {
+        if (combined().length === 0) {
+          ctx.ui.notify("No workflow runs", "info");
+          return;
         }
+        const picked = await livePicker(ctx, "Workflow runs:", () =>
+          combined().map(describeRun),
+        );
+        if (picked === undefined) return;
+        const record = combined()[picked];
+        if (!record) return;
+
+        await liveDetailView(ctx, () => {
+          const active = activeRuns.get(record.runId);
+          const current = active?.record ?? record;
+          return buildRunDetailLines(current, {
+            currentPhase: active?.currentPhase,
+            agents: active ? [...active.agents.values()] : undefined,
+            logs: active?.logs,
+            dir:
+              active?.dir ??
+              `~/.pi/agent/workflows/${record.runId}`,
+          });
+        });
       }
     },
   });

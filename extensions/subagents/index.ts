@@ -13,8 +13,9 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { Key, matchesKey, Text, truncateToWidth } from "@earendil-works/pi-tui";
+import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { liveDetailView } from "../shared/live-detail.ts";
 import {
   buildAgentTypeError,
   buildCheckResult,
@@ -347,36 +348,16 @@ export default function subagents(pi: ExtensionAPI) {
         const snapshot = manager.list()[picked];
         if (!snapshot) return;
 
-        await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
-          const interval = setInterval(() => tui.requestRender(), 1_000);
-          return {
-            render: (width: number) => {
-              const current = manager.get(snapshot.id) ?? snapshot;
-              const runtime = describeRuntime(current);
-              const lines = [
-                `${current.id} (${current.agentType}) "${current.title}" — ${describeStatus(current)} after ${describeDuration(current.startedAt, current.settledAt)}, run ${current.runs}`,
-                ...(runtime ? [runtime] : []),
-                ...(current.sessionFile ? [`session: ${current.sessionFile}`] : []),
-                "",
-                ...manager.transcriptTail(current.id, 20),
-              ];
-              const out = lines.map((line) => truncateToWidth(` ${line}`, width));
-              out.push("");
-              out.push(truncateToWidth(theme.fg("dim", " Esc back to list"), width));
-              return out;
-            },
-            invalidate: () => {},
-            handleInput: (data: string) => {
-              if (
-                matchesKey(data, Key.escape) ||
-                matchesKey(data, Key.enter) ||
-                data === "q"
-              ) {
-                done(undefined);
-              }
-            },
-            dispose: () => clearInterval(interval),
-          };
+        await liveDetailView(ctx, () => {
+          const current = manager.get(snapshot.id) ?? snapshot;
+          const runtime = describeRuntime(current);
+          return [
+            `${current.id} (${current.agentType}) "${current.title}" — ${describeStatus(current)} after ${describeDuration(current.startedAt, current.settledAt)}, run ${current.runs}`,
+            ...(runtime ? [runtime] : []),
+            ...(current.sessionFile ? [`session: ${current.sessionFile}`] : []),
+            "",
+            ...manager.transcriptTail(current.id, 20),
+          ];
         });
       }
     },

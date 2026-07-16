@@ -51,6 +51,48 @@ export function describeRun(record: RunRecord) {
   return `${record.runId} [${record.status}] ${record.name} — ${record.agentCount} agent(s), ${duration}`;
 }
 
+export interface RunDetailAgent {
+  label: string;
+  phase?: string;
+  state: "running" | "ok" | "failed";
+  error?: string;
+  durationMs?: number;
+}
+
+/** Detail-view body for /workflows (live for active runs, static for disk). */
+export function buildRunDetailLines(
+  record: RunRecord,
+  extras: {
+    currentPhase?: string;
+    agents?: RunDetailAgent[];
+    logs?: string[];
+    dir: string;
+  },
+) {
+  const lines = [describeRun(record)];
+  if (record.error) lines.push(`error: ${record.error.slice(0, 200)}`);
+  if (extras.currentPhase && record.status === "running") {
+    lines.push(`phase: ${extras.currentPhase}`);
+  }
+  if (extras.agents && extras.agents.length > 0) {
+    lines.push("");
+    for (const agent of extras.agents) {
+      const icon =
+        agent.state === "running" ? "◆" : agent.state === "ok" ? "✓" : "✗";
+      lines.push(
+        `${icon} ${agent.label}${agent.phase ? ` [${agent.phase}]` : ""}${agent.durationMs !== undefined ? ` ${Math.round(agent.durationMs / 1000)}s` : ""}${agent.error ? ` — ${agent.error.slice(0, 80)}` : ""}`,
+      );
+    }
+  }
+  const logs = extras.logs?.slice(-5) ?? [];
+  if (logs.length > 0) {
+    lines.push("", "log:");
+    lines.push(...logs.map((l) => `  ${l}`));
+  }
+  lines.push("", `artifacts: ${extras.dir}`);
+  return lines;
+}
+
 export function buildRunResult(record: RunRecord, value: unknown, dir: string) {
   const lines = [
     `Workflow "${record.name}" ${record.status} — ${record.agentCount} agent(s), ${Math.round(((record.settledAt ?? Date.now()) - record.startedAt) / 1000)}s.`,

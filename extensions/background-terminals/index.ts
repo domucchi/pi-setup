@@ -13,8 +13,9 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { Key, matchesKey, Text, truncateToWidth } from "@earendil-works/pi-tui";
+import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { liveDetailView } from "../shared/live-detail.ts";
 import {
   BG_KILL_DESCRIPTION,
   BG_LIST_DESCRIPTION,
@@ -243,35 +244,9 @@ export default function backgroundTerminals(pi: ExtensionAPI) {
         const entry = manager.list()[picked];
         if (!entry) return;
 
-        await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
-          const interval = setInterval(() => tui.requestRender(), 1_000);
-          return {
-            render: (width: number) => {
-              const lines = buildPsDetailLines(
-                manager.get(entry.id) ?? entry,
-              ).map((line) => truncateToWidth(` ${line}`, width));
-              lines.push("");
-              lines.push(
-                truncateToWidth(
-                  theme.fg("dim", " Esc back to list"),
-                  width,
-                ),
-              );
-              return lines;
-            },
-            invalidate: () => {},
-            handleInput: (data: string) => {
-              if (
-                matchesKey(data, Key.escape) ||
-                matchesKey(data, Key.enter) ||
-                data === "q"
-              ) {
-                done(undefined);
-              }
-            },
-            dispose: () => clearInterval(interval),
-          };
-        });
+        await liveDetailView(ctx, () =>
+          buildPsDetailLines(manager.get(entry.id) ?? entry),
+        );
       }
     },
   });
