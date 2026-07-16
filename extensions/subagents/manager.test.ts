@@ -25,6 +25,8 @@ function stubChildFactory() {
     children.push(record);
     return {
       sessionFile: undefined,
+      modelLabel: "test/model-1",
+      thinkingLevel: "medium",
       prompt: (text) => {
         record.prompts.push(text);
         record.streaming = true;

@@ -107,10 +107,19 @@ export function buildWaitResult(snapshots: SubagentSnapshot[]) {
     .join("\n\n");
 }
 
+export function describeRuntime(snapshot: SubagentSnapshot) {
+  const parts: string[] = [];
+  if (snapshot.model) parts.push(snapshot.model);
+  if (snapshot.thinking) parts.push(`thinking ${snapshot.thinking}`);
+  return parts.join(" · ");
+}
+
 export function buildCheckResult(snapshot: SubagentSnapshot) {
   const lines = [
     `${snapshot.id} (${snapshot.agentType}) "${snapshot.title}" — ${describeStatus(snapshot)} after ${describeDuration(snapshot.startedAt, snapshot.settledAt)}, run ${snapshot.runs}`,
   ];
+  const runtime = describeRuntime(snapshot);
+  if (runtime) lines.push(runtime);
   if (snapshot.tokens !== null && snapshot.contextWindow) {
     lines.push(
       `context: ${Math.round((snapshot.tokens / snapshot.contextWindow) * 100)}% of ${Math.round(snapshot.contextWindow / 1000)}k`,

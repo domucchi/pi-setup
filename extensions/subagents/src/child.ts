@@ -161,6 +161,8 @@ export type ChildEvent =
 
 export interface ChildHandle {
   sessionFile: string | undefined;
+  modelLabel: string | undefined;
+  thinkingLevel: string | undefined;
   prompt(text: string): void;
   steer(text: string): Promise<void>;
   isStreaming(): boolean;
@@ -366,6 +368,10 @@ export async function createChild(options: CreateChildOptions): Promise<ChildHan
 
   return {
     sessionFile: session.sessionFile,
+    modelLabel: session.model
+      ? `${session.model.provider}/${session.model.id}`
+      : undefined,
+    thinkingLevel: String(session.thinkingLevel ?? "") || undefined,
     prompt: startRun,
     steer: (text) => session.steer(text),
     isStreaming: () => session.isStreaming,
@@ -411,13 +417,25 @@ export async function createChild(options: CreateChildOptions): Promise<ChildHan
     transcriptTail(lines: number) {
       const out: string[] = [];
       for (const message of session.messages as unknown[]) {
-        const record = message as { role?: string };
+        const record = message as { role?: string; content?: unknown };
         if (record.role === "user") {
           const text = messageText(message, "user").trim();
           if (text) out.push(`> ${text.split("\n")[0]}`);
         } else if (record.role === "assistant") {
-          const text = messageText(message, "assistant").trim();
-          if (text) out.push(...text.split("\n"));
+          // Early responses are often pure tool calls with no text —
+          // show them, or a mid-run transcript looks empty.
+          if (!Array.isArray(record.content)) continue;
+          for (const part of record.content as {
+            type?: string;
+            text?: string;
+            name?: string;
+          }[]) {
+            if (part?.type === "text" && part.text?.trim()) {
+              out.push(...part.text.trim().split("\n"));
+            } else if (part?.type === "toolCall" && part.name) {
+              out.push(`  → ${part.name}`);
+            }
+          }
         }
       }
       return out.slice(-lines);

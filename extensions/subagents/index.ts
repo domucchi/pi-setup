@@ -25,6 +25,7 @@ import {
   CANCEL_DESCRIPTION,
   CHECK_DESCRIPTION,
   describeDuration,
+  describeRuntime,
   describeStatus,
   LIST_DESCRIPTION,
   PARAMETER_DESCRIPTIONS,
@@ -352,8 +353,10 @@ export default function subagents(pi: ExtensionAPI) {
           return {
             render: (width: number) => {
               const current = manager.get(snapshot.id) ?? snapshot;
+              const runtime = describeRuntime(current);
               const lines = [
                 `${current.id} (${current.agentType}) "${current.title}" — ${describeStatus(current)} after ${describeDuration(current.startedAt, current.settledAt)}, run ${current.runs}`,
+                ...(runtime ? [runtime] : []),
                 ...(current.sessionFile ? [`session: ${current.sessionFile}`] : []),
                 "",
                 ...manager.transcriptTail(current.id, 20),

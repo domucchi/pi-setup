@@ -22,6 +22,7 @@ export interface SubagentSnapshot {
   contextWindow: number | null;
   sessionFile: string | undefined;
   model: string | undefined;
+  thinking: string | undefined;
 }
 
 interface Entry {
@@ -107,6 +108,7 @@ export class SubagentManager {
         contextWindow: null,
         sessionFile: undefined,
         model: options.model,
+        thinking: undefined,
       };
 
       const child = await this.hooks.createChild({
@@ -116,6 +118,8 @@ export class SubagentManager {
 
       const entry: Entry = { snapshot, child, settleWaiters: [] };
       snapshot.sessionFile = child.sessionFile;
+      snapshot.model = child.modelLabel ?? options.model;
+      snapshot.thinking = child.thinkingLevel;
       this.entries.set(id, entry);
       this.hooks.onWorkingCountChanged?.(this.workingCount() - 1);
       child.prompt(options.prompt);
