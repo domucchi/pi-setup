@@ -154,6 +154,18 @@ export type RunOutcome =
   | { kind: "failed"; errorText: string; partialText?: string }
   | { kind: "interrupted"; partialText?: string };
 
+/**
+ * Whether the first-response watchdog should abort the run when it fires.
+ * Keyed on whether a real response was seen — NOT on isStreaming, which
+ * stays true for the whole active run and would mask a pre-token stall.
+ */
+export function firstResponseWatchdogExpired(state: {
+  settled: boolean;
+  firstResponseSeen: boolean;
+}): boolean {
+  return !state.settled && !state.firstResponseSeen;
+}
+
 export type ChildEvent =
   | { type: "run-started" }
   | { type: "activity"; preview: string }
@@ -256,6 +268,7 @@ export async function createChild(options: CreateChildOptions): Promise<ChildHan
   const state = {
     closed: false,
     settled: true,
+    firstResponseSeen: false,
     runError: undefined as string | undefined,
     watchdog: undefined as ReturnType<typeof setTimeout> | undefined,
   };
@@ -267,6 +280,12 @@ export async function createChild(options: CreateChildOptions): Promise<ChildHan
   const clearWatchdog = () => {
     if (state.watchdog) clearTimeout(state.watchdog);
     state.watchdog = undefined;
+  };
+
+  /** A real provider response arrived — the first-response guard is done. */
+  const markFirstResponse = () => {
+    state.firstResponseSeen = true;
+    clearWatchdog();
   };
 
   const finalText = () => {
@@ -312,10 +331,10 @@ export async function createChild(options: CreateChildOptions): Promise<ChildHan
         guard.apply(session); // tools may register between runs
         break;
       case "message_update":
-        clearWatchdog();
+        markFirstResponse();
         break;
       case "tool_execution_start":
-        clearWatchdog(); // a tool call is a real first response
+        markFirstResponse(); // a tool call is a real first response
         emit({ type: "activity", preview: `→ ${event.toolName}` });
         break;
       case "tool_execution_end":
@@ -334,10 +353,11 @@ export async function createChild(options: CreateChildOptions): Promise<ChildHan
   const startRun = (text: string) => {
     state.runError = undefined;
     state.settled = false;
+    state.firstResponseSeen = false;
     emit({ type: "run-started" });
     clearWatchdog();
     state.watchdog = setTimeout(() => {
-      if (!state.settled && !session.isStreaming) {
+      if (firstResponseWatchdogExpired(state)) {
         state.runError = `No response from the provider within ${FIRST_RESPONSE_WATCHDOG_MS / 1000}s.`;
         void session.abort().catch(() => undefined);
         settle();

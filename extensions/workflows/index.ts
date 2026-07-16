@@ -16,6 +16,8 @@ import { Type } from "typebox";
 import { liveDetailView } from "../shared/live-detail.ts";
 import { livePicker } from "../shared/live-picker.ts";
 import {
+  buildBackgroundFailureMessage,
+  buildBackgroundStartMessage,
   buildRunDetailLines,
   buildRunResult,
   describeRun,
@@ -62,6 +64,19 @@ export default function workflows(pi: ExtensionAPI) {
   const activeRuns = new Map<string, ActiveRun>();
   const pendingResults = new Map<string, string>();
 
+  const sendResult = (runId: string, text: string) => {
+    pi.sendMessage(
+      { customType: RESULT_MESSAGE_TYPE, content: text, display: true, details: { runId } },
+      { deliverAs: "followUp", triggerTurn: true },
+    );
+  };
+
+  /** Deliver a background result now if idle, else on the next agent_settled. */
+  const deliverOrQueue = (runId: string, text: string) => {
+    if (currentCtx?.isIdle()) sendResult(runId, text);
+    else pendingResults.set(runId, text);
+  };
+
   const updateWidget = () => {
     if (!currentCtx) return;
     const running = [...activeRuns.values()].filter(
@@ -83,12 +98,7 @@ export default function workflows(pi: ExtensionAPI) {
   });
 
   pi.on("agent_settled", () => {
-    for (const text of pendingResults.values()) {
-      pi.sendMessage(
-        { customType: RESULT_MESSAGE_TYPE, content: text, display: true, details: {} },
-        { deliverAs: "followUp", triggerTurn: true },
-      );
-    }
+    for (const [runId, text] of pendingResults) sendResult(runId, text);
     pendingResults.clear();
   });
 
@@ -282,28 +292,48 @@ export default function workflows(pi: ExtensionAPI) {
         // tool result can return it immediately (per DESIGN.md).
         const { meta } = extractMeta(source!);
         const runId = newRunId();
-        void executeRun({
+        const startedAt = Date.now();
+        executeRun({
           source: source!,
           args: params.args,
           ctx,
           signal: undefined,
           runId,
-        }).then(({ record, result, dir }) => {
-          const text = buildRunResult(record, result.ok ? result.value : undefined, dir);
-          if (currentCtx?.isIdle()) {
-            pi.sendMessage(
-              { customType: RESULT_MESSAGE_TYPE, content: text, display: true, details: { runId: record.runId } },
-              { deliverAs: "followUp", triggerTurn: true },
+        })
+          .then(({ record, result, dir }) => {
+            deliverOrQueue(
+              record.runId,
+              buildRunResult(record, result.ok ? result.value : undefined, dir),
             );
-          } else {
-            pendingResults.set(record.runId, text);
-          }
-        });
+          })
+          .catch((error) => {
+            // A detached run must never fail silently: persist a failed
+            // status where possible and always notify with the runId.
+            const message = error instanceof Error ? error.message : String(error);
+            try {
+              createRunStore(runId).saveStatus({
+                runId,
+                name: meta.name,
+                description: meta.description,
+                status: "failed",
+                startedAt,
+                settledAt: Date.now(),
+                agentCount: 0,
+                error: message,
+              });
+            } catch {
+              // Disk unavailable — the follow-up below is still sent.
+            }
+            deliverOrQueue(
+              runId,
+              buildBackgroundFailureMessage(meta.name, runId, message),
+            );
+          });
         return {
           content: [
             {
               type: "text" as const,
-              text: `Workflow "${meta.name}" started in the background as ${runId}. You will be notified with the result; /workflows ${runId} shows progress.`,
+              text: buildBackgroundStartMessage(meta.name, runId),
             },
           ],
           details: { runId, status: "running" },

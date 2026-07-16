@@ -102,9 +102,30 @@ export function createAgentRunner(options: {
       state: "started",
     });
 
+    // Exactly one settled event per started request, whatever path we take
+    // (abort, unknown role, error, or a real run) — so every agent lands in
+    // the /workflows tree and the resume journal.
+    let finalized = false;
+    const finalize = (outcome: SandboxAgentOutcome): SandboxAgentOutcome => {
+      if (finalized) return outcome;
+      finalized = true;
+      options.onEvent?.({
+        seq: request.id,
+        label,
+        phase: request.opts.phase,
+        state: "settled",
+        ok: outcome.ok,
+        error: outcome.error,
+        durationMs: Date.now() - startedAt,
+        output: outcome.output,
+        structured: outcome.structured,
+      });
+      return outcome;
+    };
+
     try {
       if (options.signal?.aborted) {
-        return { ok: false, output: "", error: "Run aborted." };
+        return finalize({ ok: false, output: "", error: "Run aborted." });
       }
       const definitions = loadAgentDefinitions({
         agentDir: getAgentDir(),
@@ -113,11 +134,11 @@ export function createAgentRunner(options: {
       });
       const definition = definitions.get(request.opts.agentType ?? "worker");
       if (!definition) {
-        return {
+        return finalize({
           ok: false,
           output: "",
           error: `Unknown agentType "${request.opts.agentType}".`,
-        };
+        });
       }
 
       const capture: { value?: unknown } = {};
@@ -164,61 +185,34 @@ export function createAgentRunner(options: {
       });
 
       const outcome = await settled;
-      const durationMs = Date.now() - startedAt;
 
       if (outcome.kind === "completed") {
-        let structured: unknown;
-        if (request.opts.schema) {
-          structured = capture.value;
-          if (structured === undefined) {
-            options.onEvent?.({
-              seq: request.id,
-              label,
-              phase: request.opts.phase,
-              state: "settled",
-              ok: false,
-              error: "schema requested but report_result was never called",
-              durationMs,
-            });
-            return {
-              ok: false,
-              output: outcome.finalText,
-              error: `The agent never called ${REPORT_TOOL_NAME}; no structured result.`,
-            };
-          }
+        if (request.opts.schema && capture.value === undefined) {
+          return finalize({
+            ok: false,
+            output: outcome.finalText,
+            error: `The agent never called ${REPORT_TOOL_NAME}; no structured result.`,
+          });
         }
-        options.onEvent?.({
-          seq: request.id,
-          label,
-          phase: request.opts.phase,
-          state: "settled",
+        return finalize({
           ok: true,
-          durationMs,
           output: outcome.finalText,
-          structured,
+          structured: request.opts.schema ? capture.value : undefined,
         });
-        return { ok: true, output: outcome.finalText, structured };
       }
 
       const error =
         outcome.kind === "failed" ? outcome.errorText : "Agent run was interrupted.";
-      options.onEvent?.({
-        seq: request.id,
-        label,
-        phase: request.opts.phase,
-        state: "settled",
-        ok: false,
-        error,
-        durationMs,
-      });
-      return { ok: false, output: outcome.partialText ?? "", error };
+      return finalize({ ok: false, output: outcome.partialText ?? "", error });
     } catch (error) {
-      return {
+      return finalize({
         ok: false,
         output: "",
         error: error instanceof Error ? error.message : String(error),
-      };
+      });
     } finally {
+      // Safety net: if some path returned without finalizing, still emit.
+      finalize({ ok: false, output: "", error: "Agent did not report an outcome." });
       semaphore.release();
     }
   }

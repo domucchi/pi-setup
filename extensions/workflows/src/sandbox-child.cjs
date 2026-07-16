@@ -99,13 +99,19 @@ const BOOTSTRAP = `(function (__host, __argsJson) {
   };
 
   // Determinism guards on the context-native Math/Date (breaks resume).
-  Math.random = function () {
+  // Installed non-writable/non-configurable so a script can't reassign or
+  // delete them (e.g. Math.random = () => 1) to fake determinism.
+  const lock = (obj, key, value) =>
+    Object.defineProperty(obj, key, { value, writable: false, configurable: false });
+
+  lock(Math, "random", function () {
     throw new Error("Math.random() is unavailable in workflow scripts (breaks resume). Vary prompts by index instead.");
-  };
+  });
   const NativeDate = Date;
-  NativeDate.now = function () {
+  const throwNow = function () {
     throw new Error("Date.now() is unavailable in workflow scripts (breaks resume). Pass timestamps via args.");
   };
+  lock(NativeDate, "now", throwNow);
   class SafeDate extends NativeDate {
     constructor(...a) {
       if (a.length === 0) {
@@ -114,6 +120,8 @@ const BOOTSTRAP = `(function (__host, __argsJson) {
       super(...a);
     }
   }
+  // SafeDate.now would otherwise be a shadowable own slot; lock it too.
+  lock(SafeDate, "now", throwNow);
 
   const agent = function (prompt, opts) {
     if (typeof prompt !== "string" || !prompt.trim()) {
@@ -240,10 +248,17 @@ async function run(init) {
     return fail(`Sandbox bootstrap failed: ${error.message}`);
   }
   const argsJson = init.args === undefined ? undefined : JSON.stringify(init.args);
-  const api = factory(hostBridge, argsJson);
+  const { Date: safeDate, ...dsl } = factory(hostBridge, argsJson);
   // api.* are context-native (built by context code); installing them as
   // context globals keeps them context-native.
-  Object.assign(sandbox, api);
+  Object.assign(sandbox, dsl);
+  // Lock the Date binding so a script can't swap it for a fake with a
+  // working now() (the guard on SafeDate.now only helps if Date is Date).
+  Object.defineProperty(sandbox, "Date", {
+    value: safeDate,
+    writable: false,
+    configurable: false,
+  });
 
   let script;
   try {

@@ -113,3 +113,15 @@ export function buildRunResult(record: RunRecord, value: unknown, dir: string) {
   lines.push("", `Artifacts: ${dir}`);
   return lines.join("\n");
 }
+
+export function buildBackgroundStartMessage(name: string, runId: string) {
+  return `Workflow "${name}" started in the background as ${runId}. You will be notified with the result; /workflows shows progress.`;
+}
+
+export function buildBackgroundFailureMessage(
+  name: string,
+  runId: string,
+  error: string,
+) {
+  return `Background workflow "${name}" (${runId}) failed before completing: ${error}`;
+}
