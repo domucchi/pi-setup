@@ -24,6 +24,11 @@ import {
 } from "@earendil-works/pi-tui";
 import { formatDuration } from "../shared/agent-format.ts";
 import { runCommand } from "../shared/process.ts";
+import {
+  composeWorkingMessage,
+  phaseLabel,
+  toolActivityLabel,
+} from "./src/activity.ts";
 import { gradientLogo } from "./src/gradient.ts";
 import {
   formatContext,
@@ -306,14 +311,18 @@ export default function uiCustomization(pi: ExtensionAPI) {
     installStatusFilter();
   };
 
-  // ---- Working timer: the built-in loader says just "Working..." —
-  // tick the elapsed time into it, and when the run settles leave a
-  // small dim line with the total. The line is a custom ENTRY (not a
-  // message), so it renders in the chat and persists in the session
-  // without ever entering the model's context.
+  // ---- Working line: the built-in loader says just "Working..." —
+  // show what the agent is actually doing (current tool + args preview,
+  // or thinking/writing phase), elapsed time, and output tokens for the
+  // run. When the run settles, leave a small dim line with the total.
+  // That line is a custom ENTRY (not a message), so it renders in the
+  // chat and persists in the session without entering model context.
   const WORK_ENTRY_TYPE = "worked-for";
   let workStartedAt: number | undefined;
   let workTicker: ReturnType<typeof setInterval> | undefined;
+  let workActivity: string | undefined;
+  let workOutputTokens = 0;
+  let workInTool = false;
 
   pi.registerEntryRenderer<{ ms: number }>(WORK_ENTRY_TYPE, (entry, _options, theme) => {
     return new Text(
@@ -328,25 +337,55 @@ export default function uiCustomization(pi: ExtensionAPI) {
     workTicker = undefined;
   };
 
+  const updateWorkingLine = (ctx: ExtensionContext) => {
+    if (workStartedAt === undefined || ctx.mode !== "tui") return;
+    ctx.ui.setWorkingMessage(
+      composeWorkingMessage({
+        activity: workActivity,
+        elapsedMs: Date.now() - workStartedAt,
+        outputTokens: workOutputTokens,
+      }),
+    );
+  };
+
   pi.on("agent_start", (_event, ctx) => {
     if (ctx.mode !== "tui") return;
     workStartedAt = Date.now();
-    const update = () => {
-      if (workStartedAt === undefined) return;
-      ctx.ui.setWorkingMessage(
-        `Working... ${formatDuration(Date.now() - workStartedAt)} · esc to interrupt`,
-      );
-    };
-    update();
+    workActivity = "thinking…";
+    workOutputTokens = 0;
+    workInTool = false;
+    updateWorkingLine(ctx);
     stopWorkTicker();
-    workTicker = setInterval(update, 1_000);
+    workTicker = setInterval(() => updateWorkingLine(ctx), 1_000);
     workTicker.unref?.();
+  });
+
+  pi.on("tool_execution_start", (event, ctx) => {
+    if (workStartedAt === undefined) return;
+    workInTool = true;
+    workActivity = toolActivityLabel(event.toolName, event.args);
+    updateWorkingLine(ctx);
+  });
+
+  pi.on("tool_execution_end", (_event, ctx) => {
+    if (workStartedAt === undefined) return;
+    workInTool = false;
+    workActivity = "thinking…";
+    updateWorkingLine(ctx);
+  });
+
+  // Fires per streaming delta — keep it O(1) and let the ticker render.
+  pi.on("message_update", (event) => {
+    if (workStartedAt === undefined || workInTool) return;
+    const phase = phaseLabel(event.assistantMessageEvent.type);
+    if (phase) workActivity = phase;
   });
 
   pi.on("agent_settled", (_event, ctx) => {
     if (workStartedAt === undefined) return;
     const ms = Date.now() - workStartedAt;
     workStartedAt = undefined;
+    workActivity = undefined;
     stopWorkTicker();
     if (ctx.mode !== "tui") return;
     ctx.ui.setWorkingMessage();
@@ -377,7 +416,14 @@ export default function uiCustomization(pi: ExtensionAPI) {
     }
   });
   pi.on("turn_end", nudge);
-  pi.on("message_end", nudge);
+  pi.on("message_end", (event) => {
+    // Accumulate the run's output tokens for the working line.
+    const message = event.message as { role?: string; usage?: { output?: number } };
+    if (workStartedAt !== undefined && message.role === "assistant") {
+      workOutputTokens += message.usage?.output ?? 0;
+    }
+    nudge();
+  });
   pi.on("tool_execution_end", nudge);
   pi.on("agent_settled", nudge);
   pi.on("model_select", nudge);
