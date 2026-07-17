@@ -4,6 +4,7 @@ import {
   allDone,
   displayWindow,
   extraInProgress,
+  parseTodos,
   strike,
   summarize,
   todoCounts,
@@ -83,6 +84,23 @@ describe("extraInProgress", () => {
       extraInProgress([todo("in_progress", "a"), todo("in_progress", "b")]),
     ).toEqual(["a", "b"]);
     expect(extraInProgress([])).toEqual([]);
+  });
+});
+
+describe("parseTodos", () => {
+  it("round-trips valid lists and drops malformed items", () => {
+    const todos = [todo("in_progress", "a"), todo("pending", "b")];
+    expect(parseTodos(todos)).toEqual(todos);
+    expect(
+      parseTodos([
+        { text: "ok", status: "completed" },
+        { text: 42, status: "pending" },
+        { text: "bad-status", status: "doing" },
+        "junk",
+      ]),
+    ).toEqual([{ text: "ok", status: "completed" }]);
+    expect(parseTodos(undefined)).toEqual([]);
+    expect(parseTodos("nope")).toEqual([]);
   });
 });
 

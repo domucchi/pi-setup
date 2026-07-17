@@ -55,6 +55,24 @@ export function extraInProgress(todos: Todo[]): string[] {
   return active.length > 1 ? active.map((t) => t.text) : [];
 }
 
+/** Parse persisted tool-result details back into a todo list (lenient). */
+export function parseTodos(value: unknown): Todo[] {
+  if (!Array.isArray(value)) return [];
+  const todos: Todo[] = [];
+  for (const item of value) {
+    const record = item as { text?: unknown; status?: unknown };
+    if (
+      typeof record?.text === "string" &&
+      (record.status === "pending" ||
+        record.status === "in_progress" ||
+        record.status === "completed")
+    ) {
+      todos.push({ text: record.text, status: record.status });
+    }
+  }
+  return todos;
+}
+
 /** ANSI strikethrough (SGR 9) — supported by all modern terminals. */
 export function strike(text: string): string {
   return `\x1b[9m${text}\x1b[29m`;

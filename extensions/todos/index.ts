@@ -24,6 +24,7 @@ import {
   displayWindow,
   extraInProgress,
   MAX_TODOS,
+  parseTodos,
   strike,
   summarize,
   type Todo,
@@ -58,7 +59,7 @@ export default function todos(pi: ExtensionAPI) {
     const lines: string[] = [];
     if (doneCollapsed > 0) {
       lines.push(
-        ` ${theme.fg("success", "✓")} ${theme.fg("dim", `${doneCollapsed} done`)}`,
+        ` ${theme.fg("success", "✓")} ${theme.fg("dim", `+${doneCollapsed} done`)}`,
       );
     }
     for (const todo of shown) {
@@ -109,10 +110,38 @@ export default function todos(pi: ExtensionAPI) {
     );
   };
 
+  // A resumed session gets its list back from the LAST todo_write tool
+  // result on the branch — tool results already persist in the session
+  // file, so no extra storage is needed and the widget matches what the
+  // model believes its list to be.
+  const rehydrate = (ctx: ExtensionContext): Todo[] => {
+    try {
+      const entries = ctx.sessionManager.getBranch();
+      for (let i = entries.length - 1; i >= 0; i--) {
+        const entry = entries[i];
+        if (entry.type !== "message") continue;
+        const message = entry.message as {
+          role?: string;
+          toolName?: string;
+          details?: { todos?: unknown };
+        };
+        if (message.role !== "toolResult" || message.toolName !== "todo_write") {
+          continue;
+        }
+        return parseTodos(message.details?.todos);
+      }
+    } catch {
+      // Session not readable yet — start empty.
+    }
+    return [];
+  };
+
   pi.on("session_start", (_event, ctx) => {
     currentCtx = ctx;
-    list = [];
-    completedAt = undefined;
+    list = rehydrate(ctx);
+    // A fully-done list should not reappear on resume: mark it already
+    // past its linger window instead of restarting the countdown.
+    completedAt = allDone(list) ? 0 : undefined;
     updateWidget();
   });
 
