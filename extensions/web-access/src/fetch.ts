@@ -51,9 +51,11 @@ export async function fetchUrl(
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  // Tool-execution abort cancels the network work too.
+  // Tool-execution abort cancels the network work too. Named listener so
+  // it can be removed — a shared signal must not accumulate listeners.
+  const onAbort = () => controller.abort();
   if (deps.signal?.aborted) controller.abort();
-  else deps.signal?.addEventListener("abort", () => controller.abort(), { once: true });
+  else deps.signal?.addEventListener("abort", onAbort, { once: true });
   try {
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
       if (current.protocol !== "http:" && current.protocol !== "https:") {
@@ -131,6 +133,7 @@ export async function fetchUrl(
     return errorResult(current.href, message);
   } finally {
     clearTimeout(timer);
+    deps.signal?.removeEventListener("abort", onAbort);
   }
 }
 

@@ -4,8 +4,9 @@ Decisions made with the user; build from this, don't relitigate.
 
 ## Execution model
 
-- In-process pi SDK children via `createAgentSession()` — **pi backend only**
-  (no claude/codex backends; revisit only on felt need).
+- In-process pi SDK children via `createAgentSession()` (default `pi`
+  backend), plus external `claude` and `codex` backends added 2026-07-17
+  (src/backends/, selected by the role's `backend:` field).
 - Real session files, so children are inspectable via `/resume`.
 - Child resources loaded per cwd with trust gating (port
   `reference/my-pi-setup/extensions/shared/child-session.ts` semantics):
@@ -78,8 +79,9 @@ Decisions made with the user; build from this, don't relitigate.
 
 ## Deferred (v2+)
 
-- Worktree isolation flag; claude/codex backends; structured output
-  option; takeover UI; persistence across session switches.
+- Worktree isolation flag; takeover UI; persistence across session
+  switches. (claude/codex backends and workflow structured output —
+  shipped 2026-07-17.)
 - **Dispose-on-settle by default (opt-in keep_alive).** Today children
   stay alive after settling so subagent_send can resume them; only
   cancel/LRU/shutdown dispose them. Most spawns are fire-and-forget, so

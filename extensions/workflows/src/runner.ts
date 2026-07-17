@@ -76,7 +76,7 @@ function makeSemaphore(limit: number) {
 
 const REPORT_TOOL_NAME = "report_result";
 
-function buildReportTool(
+export function buildReportTool(
   schema: unknown,
   capture: { value?: unknown; reported?: boolean },
 ): ToolDefinition {

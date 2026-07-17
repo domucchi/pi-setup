@@ -1,5 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { createAgentRunner, type RunnerEvent } from "./src/runner.ts";
+import {
+  buildReportTool,
+  createAgentRunner,
+  type RunnerEvent,
+} from "./src/runner.ts";
+
+describe("buildReportTool exactly-once", () => {
+  it("records the first result and rejects a second call", async () => {
+    const capture: { value?: unknown; reported?: boolean } = {};
+    const tool = buildReportTool({ type: "object" }, capture);
+    await tool.execute("c1", { answer: "first" }, undefined as never, undefined, undefined as never);
+    expect(capture.value).toEqual({ answer: "first" });
+    expect(capture.reported).toBe(true);
+    await expect(
+      tool.execute("c2", { answer: "second" }, undefined as never, undefined, undefined as never),
+    ).rejects.toThrow(/already called/);
+    expect(capture.value).toEqual({ answer: "first" }); // unchanged
+  });
+});
 
 // These paths return before createChild, so a real model registry is
 // never touched — a minimal context is enough to exercise finalization.

@@ -2,6 +2,23 @@ import { describe, expect, it } from "vitest";
 import { runCommand } from "./process.ts";
 
 describe("runCommand", () => {
+  it("kills the subprocess promptly when the signal aborts", async () => {
+    const controller = new AbortController();
+    const started = Date.now();
+    const promise = runCommand(
+      process.execPath,
+      ["-e", "setTimeout(() => {}, 30000)"],
+      process.cwd(),
+      30_000,
+      { signal: controller.signal },
+    );
+    setTimeout(() => controller.abort(), 50);
+    const result = await promise;
+    expect(result.code).toBe(-1);
+    expect(result.stderr).toContain("aborted");
+    expect(Date.now() - started).toBeLessThan(5_000); // not the 30s timeout
+  });
+
   it("captures stdout and exit code", async () => {
     const result = await runCommand(
       process.execPath,

@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  assertPublicUrl,
-  isPrivateIp,
-  parseV6Groups,
-  SsrfError,
-} from "./src/ssrf.ts";
+import { parseV6Groups } from "../shared/ip.ts";
+import { assertPublicUrl, isPrivateIp, SsrfError } from "./src/ssrf.ts";
 
 describe("isPrivateIp", () => {
   it("flags loopback, link-local, private, and CGNAT v4", () => {

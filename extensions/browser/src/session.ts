@@ -5,38 +5,48 @@
  * view, like a human with one tab.
  */
 
-import { chromium, type Browser, type Page } from "playwright";
-import { parseV6Groups } from "../../web-access/src/ssrf.ts";
+import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import { mappedV4, parseV6Groups } from "../../shared/ip.ts";
 
 const VIEWPORT = { width: 1280, height: 720 };
 
 /**
- * Block cloud-metadata destinations at Chromium's host resolver — this
- * covers redirects, subresources, iframes, and JS-initiated navigation,
- * not just the initial browser_goto (which assertNavigable checks for a
- * clearer early error).
+ * Host-resolver rule: first line of defense for hostname-form metadata
+ * targets (169.254.*, metadata.google.internal). It does NOT cover IP
+ * LITERALS — an IPv4-mapped IPv6 literal like [::ffff:a9fe:a9fe] is
+ * already an address and skips resolution — so the request route below
+ * is the real guard. Both are installed (defense in depth).
  */
 export const METADATA_RESOLVER_RULES =
   "MAP 169.254.* ~NOTFOUND, MAP metadata.google.internal ~NOTFOUND";
 
-/** Link-local/metadata detection incl. hex IPv4-mapped IPv6 forms. */
+/**
+ * Abort every request to a metadata host — the real guard, covering IP
+ * literals the resolver rule misses (redirects, subresources, iframes,
+ * JS navigation). Routing is per-context so it applies to any page.
+ */
+export async function installMetadataGuard(context: BrowserContext) {
+  await context.route("**/*", (route) => {
+    let host: string;
+    try {
+      host = new URL(route.request().url()).hostname;
+    } catch {
+      route.continue();
+      return;
+    }
+    if (isMetadataHost(host)) route.abort("blockedbyclient");
+    else route.continue();
+  });
+}
+
+/** Link-local/metadata detection incl. hex IPv4-mapped IPv6 literals. */
 export function isMetadataHost(host: string): boolean {
   const bare = host.replace(/^\[|\]$/g, "").toLowerCase();
   if (bare === "metadata.google.internal") return true;
   if (bare.startsWith("169.254.")) return true;
   const groups = parseV6Groups(bare);
-  if (groups) {
-    const leadingZeros = groups.slice(0, 5).every((g) => g === 0);
-    const mapped = leadingZeros && (groups[5] === 0xffff || groups[5] === 0);
-    const nat64 =
-      groups[0] === 0x64 &&
-      groups[1] === 0xff9b &&
-      groups.slice(2, 6).every((g) => g === 0);
-    if (mapped || nat64) {
-      return groups[6] >> 8 === 169 && (groups[6] & 255) === 254;
-    }
-  }
-  return false;
+  const embedded = groups ? mappedV4(groups) : undefined;
+  return embedded !== undefined && embedded.startsWith("169.254.");
 }
 const CONSOLE_BUFFER = 500;
 const REQUEST_BUFFER = 300;
@@ -85,7 +95,11 @@ export class BrowserSession {
             args: [`--host-resolver-rules=${METADATA_RESOLVER_RULES}`],
           });
         }
-        const context = await this.browser.newContext({ viewport: VIEWPORT });
+        const context = await this.browser.newContext({
+          viewport: VIEWPORT,
+          serviceWorkers: "block", // no un-routed request origin
+        });
+        await installMetadataGuard(context);
         const page = await context.newPage();
         this.attachInspectors(page);
         this.page = page;

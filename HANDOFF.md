@@ -31,9 +31,11 @@ skills/subagents/SKILL.md.
 Built on playwright's PUBLIC ai-snapshot API: `page.ariaSnapshot({mode:
 "ai"})` emits [ref=eN] references and `page.locator("aria-ref=eN")`
 resolves them (same mechanics as playwright-mcp, no private APIs).
-Six tools: goto/snapshot/click/type/screenshot(→ ImageContent, renders
-in-terminal)/close. Lazy chromium per session, disposed on shutdown.
-URL policy: http(s) only, cloud-metadata blocked, localhost ALLOWED by
+Nine tools: goto/snapshot/click/type/screenshot(→ ImageContent, renders
+in-terminal)/console/evaluate/requests/close. Lazy chromium per session,
+disposed on shutdown. URL policy: http(s) only, cloud-metadata blocked
+at the context route (covers redirects/subresources/IPv6 literals),
+localhost ALLOWED by
 design (dev-server inspection is the point). 40k-char snapshot cap with
 temp-file spill. Real-chromium integration test in browser.test.ts.
 

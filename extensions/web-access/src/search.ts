@@ -69,12 +69,11 @@ export async function exaSearch(
   const includeText = options.includeText ?? false;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
+  // Named listener so it can be removed — a shared signal across many
+  // calls must not accumulate listeners.
+  const onAbort = () => controller.abort();
   if (options.signal?.aborted) controller.abort();
-  else {
-    options.signal?.addEventListener("abort", () => controller.abort(), {
-      once: true,
-    });
-  }
+  else options.signal?.addEventListener("abort", onAbort, { once: true });
   try {
     const response = await fetcher(EXA_ENDPOINT, {
       method: "POST",
@@ -120,5 +119,6 @@ export async function exaSearch(
     return { ok: false, error: { kind: "network", message } };
   } finally {
     clearTimeout(timer);
+    options.signal?.removeEventListener("abort", onAbort);
   }
 }

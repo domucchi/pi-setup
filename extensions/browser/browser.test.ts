@@ -150,17 +150,19 @@ describe("BrowserSession (real chromium)", () => {
   );
 
   it(
-    "resolver rules block metadata for ALL requests, not just goto",
+    "blocks metadata for ALL requests, incl. IPv6-literal bypass",
     { timeout: 30_000 },
     async () => {
       const page = await session.getPage();
-      // Chromium-level block: resolution fails locally and fast.
+      // Both the hostname form and the IPv6-literal form (which skips the
+      // resolver rule — sol's reproduced P1 bypass) are aborted by the
+      // context route before any request leaves.
       await expect(
         page.goto("http://metadata.google.internal/", { timeout: 10_000 }),
-      ).rejects.toThrow(/ERR_NAME_NOT_RESOLVED/);
+      ).rejects.toThrow(/ERR_(BLOCKED_BY_CLIENT|NAME_NOT_RESOLVED|FAILED|ABORTED)/);
       await expect(
-        page.goto("http://169.254.169.254/latest", { timeout: 10_000 }),
-      ).rejects.toThrow(/ERR_NAME_NOT_RESOLVED/);
+        page.goto("http://[::ffff:a9fe:a9fe]/", { timeout: 10_000 }),
+      ).rejects.toThrow(/ERR_(BLOCKED_BY_CLIENT|FAILED|ABORTED)/);
     },
   );
 

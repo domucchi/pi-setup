@@ -52,7 +52,8 @@ Setup: clone/symlink to `~/.pi/agent`, `npm install`.
    truncation (line/byte caps, full output saved to temp file, path returned).
    Guidelines steer model: fd for names, rg for contents, bash only for pipelines.
 5. **subagents** — DESIGNED, see `extensions/subagents/DESIGN.md` (settled
-   2026-07-16): in-process pi SDK children, pi backend only; Claude Code-style
+   2026-07-16; multi-backend added 2026-07-17): in-process pi SDK children
+   plus claude/codex backends (`agents/*.md` `backend:` field); Claude Code-style
    markdown agent files (`agents/*.md`, starters: explore/worker); interactive
    via `subagent_send` (children stay alive after settling for follow-ups);
    full-minus-denylist child tools (`subagent_*`, `workflow`, `ask_user`,
