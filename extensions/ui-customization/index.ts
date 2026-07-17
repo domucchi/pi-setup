@@ -317,8 +317,7 @@ export default function uiCustomization(pi: ExtensionAPI) {
 
   pi.registerEntryRenderer<{ ms: number }>(WORK_ENTRY_TYPE, (entry, _options, theme) => {
     return new Text(
-      theme.fg("success", "✓ ") +
-        theme.fg("dim", `worked for ${formatDuration(entry.data?.ms ?? 0)}`),
+      theme.fg("dim", `Worked for ${formatDuration(entry.data?.ms ?? 0)}`),
       1,
       0,
     );
