@@ -6,22 +6,20 @@ Functionally complete harness (10 hand-written extensions + MCP via
 pi-mcp-adapter) with the full UI pass DONE. 186 vitest tests, tsc clean.
 See `PLAN.md` for architecture/decisions; `README.md`/`SETUP.md` for the map.
 
-## NEXT: the two big builds (user-approved, in priority order)
+## NEXT: the remaining big build
 
-### 1. Browser extension (hand-written on the playwright npm LIBRARY)
+### DONE: browser extension (extensions/browser/)
 
-Decision made: NO playwright-mcp — tool descriptions/output discipline
-must be ours (same reasoning as web-access vs Firecrawl). playwright
-package itself is pure plumbing (allowed, like pi-mcp-adapter).
-Shape: `extensions/browser/` with ~5 tools — browser_goto,
-browser_snapshot (capped a11y tree), browser_click, browser_type,
-browser_screenshot (pi tool results support ImageContent → renders
-in-terminal). One lazily-launched persistent context per session,
-disposed on session_shutdown; SSRF-style URL guard reused from
-web-access; caps + spill like file-search. Compact renderResult from
-the start. Child agents SHOULD get these tools (worker role).
+Built on playwright's PUBLIC ai-snapshot API: `page.ariaSnapshot({mode:
+"ai"})` emits [ref=eN] references and `page.locator("aria-ref=eN")`
+resolves them (same mechanics as playwright-mcp, no private APIs).
+Six tools: goto/snapshot/click/type/screenshot(→ ImageContent, renders
+in-terminal)/close. Lazy chromium per session, disposed on shutdown.
+URL policy: http(s) only, cloud-metadata blocked, localhost ALLOWED by
+design (dev-server inspection is the point). 40k-char snapshot cap with
+temp-file spill. Real-chromium integration test in browser.test.ts.
 
-### 2. claude/codex subagent backends
+### claude/codex subagent backends
 
 Decision made: bypassPermissions is FINE (user: permission prompts are
 bloat; real sandboxing later). Reference: davis's
