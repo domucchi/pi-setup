@@ -9,12 +9,21 @@ import {
 describe("sanitizeTitle", () => {
   it("strips quotes, trailing punctuation, and extra lines", () => {
     expect(sanitizeTitle('"fix flaky watchdog test."')).toBe(
-      "fix flaky watchdog test",
+      "Fix flaky watchdog test",
     );
     expect(sanitizeTitle("workflow dashboard UI\nExplanation: because…")).toBe(
-      "workflow dashboard UI",
+      "Workflow dashboard UI",
     );
-    expect(sanitizeTitle("  spaced   out   title  ")).toBe("spaced out title");
+    expect(sanitizeTitle("  spaced   out   title  ")).toBe("Spaced out title");
+  });
+
+  it("de-Title-Cases while keeping acronyms and mixed-case names", () => {
+    expect(sanitizeTitle("Assess Webdev Tooling Gaps")).toBe(
+      "Assess webdev tooling gaps",
+    );
+    expect(sanitizeTitle("Fix GitHub MCP Auth Flow")).toBe(
+      "Fix GitHub MCP auth flow",
+    );
   });
 
   it("clamps long output at a word boundary", () => {
@@ -22,7 +31,9 @@ describe("sanitizeTitle", () => {
     const title = sanitizeTitle(long)!;
     expect(title.length).toBeLessThanOrEqual(MAX_TITLE_CHARS);
     expect(title.endsWith(" ")).toBe(false);
-    expect(long.startsWith(title)).toBe(true);
+    expect(long.startsWith(title.charAt(0).toLowerCase() + title.slice(1))).toBe(
+      true,
+    );
   });
 
   it("rejects empty output", () => {

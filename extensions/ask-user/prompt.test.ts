@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { buildResultMessage } from "./prompt.ts";
+import {
+  allAnswered,
+  answerTexts,
+  emptyAnswers,
+  firstUnanswered,
+  isAnswered,
+  nextTarget,
+  tabLabel,
+  toggleSelection,
+} from "./src/form.ts";
 import { wrapText } from "./src/wrap.ts";
 
 describe("buildResultMessage", () => {
@@ -7,41 +17,104 @@ describe("buildResultMessage", () => {
     expect(buildResultMessage({ kind: "no-ui" })).toContain("plain text");
   });
 
-  it("reports a dismissal without inventing an answer", () => {
+  it("reports a dismissal without inventing answers", () => {
     const message = buildResultMessage({ kind: "dismissed" });
     expect(message).toContain("dismissed");
     expect(message).toContain("Do not assume");
   });
 
-  it("includes the selected option index and label", () => {
-    expect(
-      buildResultMessage({ kind: "selected", answer: "Use vitest", index: 2 }),
-    ).toBe("The user selected option 2: Use vitest");
-  });
-
-  it("appends the note when the user attaches one", () => {
+  it("reports a single selection with its note", () => {
     expect(
       buildResultMessage({
-        kind: "selected",
-        answer: "Use vitest",
-        index: 2,
-        note: "but only for pure logic",
+        kind: "answered",
+        results: [
+          {
+            question: "Test runner?",
+            answers: ["Use vitest"],
+            wasCustom: false,
+            note: "but only for pure logic",
+          },
+        ],
       }),
     ).toBe(
-      "The user selected option 2: Use vitest\nThey attached a note qualifying this choice: but only for pure logic",
+      "The user selected: Use vitest\nThey attached a note qualifying this choice: but only for pure logic",
     );
-  });
-
-  it("omits the note line for empty notes", () => {
-    expect(
-      buildResultMessage({ kind: "selected", answer: "A", index: 1, note: "" }),
-    ).toBe("The user selected option 1: A");
   });
 
   it("marks free-form answers as written by the user", () => {
     expect(
-      buildResultMessage({ kind: "custom", answer: "neither, use X" }),
+      buildResultMessage({
+        kind: "answered",
+        results: [
+          { question: "Q", answers: ["neither, use X"], wasCustom: true },
+        ],
+      }),
     ).toContain("wrote their own answer: neither, use X");
+  });
+
+  it("numbers multi-question results with their answers", () => {
+    const message = buildResultMessage({
+      kind: "answered",
+      results: [
+        { question: "Coffee?", answers: ["Espresso"], wasCustom: false },
+        {
+          question: "Which to test?",
+          answers: ["Preview", "Multi"],
+          wasCustom: false,
+        },
+      ],
+    });
+    expect(message).toContain("1. Coffee?\n   → Espresso");
+    expect(message).toContain("2. Which to test?\n   → Preview, Multi");
+  });
+});
+
+describe("form state", () => {
+  const question = {
+    question: "Q?",
+    options: [{ label: "A" }, { label: "B" }, { label: "C" }],
+    multiSelect: true,
+  };
+
+  it("tracks answered state through selections and custom answers", () => {
+    const answers = emptyAnswers(2);
+    expect(isAnswered(answers[0])).toBe(false);
+    answers[0] = toggleSelection(answers[0], 1);
+    expect(isAnswered(answers[0])).toBe(true);
+    answers[1] = { selected: [], custom: "my own" };
+    expect(allAnswered(answers)).toBe(true);
+  });
+
+  it("toggles selections on and off, clearing custom text", () => {
+    let a = { selected: [0], custom: "x" } as ReturnType<typeof toggleSelection>;
+    a = toggleSelection(a, 2);
+    expect(a.selected).toEqual([0, 2]);
+    expect(a.custom).toBeUndefined();
+    a = toggleSelection(a, 0);
+    expect(a.selected).toEqual([2]);
+  });
+
+  it("advances to the next unanswered question, wrapping", () => {
+    const answers = emptyAnswers(3);
+    answers[1] = toggleSelection(answers[1], 0);
+    expect(nextTarget(answers, 1)).toBe(2);
+    answers[2] = toggleSelection(answers[2], 0);
+    expect(nextTarget(answers, 2)).toBe(0);
+    answers[0] = toggleSelection(answers[0], 0);
+    expect(nextTarget(answers, 0)).toBe(3); // submit tab
+    expect(firstUnanswered(answers)).toBeUndefined();
+  });
+
+  it("maps answers to option labels or the custom text", () => {
+    expect(answerTexts(question, { selected: [0, 2] })).toEqual(["A", "C"]);
+    expect(answerTexts(question, { selected: [], custom: "mine" })).toEqual([
+      "mine",
+    ]);
+  });
+
+  it("labels tabs from headers with Qn fallback", () => {
+    expect(tabLabel({ ...question, header: "Coffee" }, 0)).toBe("Coffee");
+    expect(tabLabel(question, 2)).toBe("Q3");
   });
 });
 

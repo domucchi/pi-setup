@@ -13,6 +13,11 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import {
+  previewOf,
+  renderCompactResult,
+  resultText,
+} from "../shared/compact-result.ts";
 import type { OverlayTheme } from "../shared/overlay.ts";
 import { showWorkflowsDashboard, type RunView } from "./dashboard.ts";
 import { createDemoRuns, demoWorkflowsHost } from "./src/demo.ts";
@@ -21,7 +26,10 @@ import {
   buildBackgroundFailureMessage,
   buildBackgroundStartMessage,
   buildRunResult,
+  buildWorkflowStatus,
   PARAMETER_DESCRIPTIONS,
+  STATUS_PARAMETER_DESCRIPTIONS,
+  WORKFLOW_STATUS_DESCRIPTION,
   WORKFLOW_DESCRIPTION,
   WORKFLOW_PROMPT_GUIDELINES,
   WORKFLOW_PROMPT_SNIPPET,
@@ -225,13 +233,25 @@ export default function workflows(pi: ExtensionAPI) {
     }
   });
 
-  pi.registerMessageRenderer(RESULT_MESSAGE_TYPE, (message, _options, theme) => {
+  // Follow-up results collapse to their summary line; ctrl+o expands.
+  pi.registerMessageRenderer(RESULT_MESSAGE_TYPE, (message, options, theme) => {
     const text =
       typeof message.content === "string"
         ? message.content
         : (message.content?.find((c) => c.type === "text") as { text: string } | undefined)
             ?.text ?? "";
-    return new Text(theme.fg("accent", "▸ ") + theme.fg("text", text), 0, 0);
+    if (options.expanded) {
+      return new Text(theme.fg("accent", "▸ ") + theme.fg("text", text), 0, 0);
+    }
+    const [first = "", ...rest] = text.split("\n");
+    const more = rest.some((line) => line.trim() !== "");
+    return new Text(
+      theme.fg("accent", "▸ ") +
+        theme.fg("text", first) +
+        (more ? theme.fg("dim", " …") : ""),
+      0,
+      0,
+    );
   });
 
   async function executeRun(options: {
@@ -334,6 +354,7 @@ export default function workflows(pi: ExtensionAPI) {
           const resultRef = store.saveAgentResult({
             seq: event.seq,
             ok: event.ok ?? false,
+            prompt: agent?.prompt,
             output: event.output,
             structured: event.structured,
             error: event.error,
@@ -497,9 +518,63 @@ export default function workflows(pi: ExtensionAPI) {
         details: { runId: record.runId, status: record.status },
       };
     },
+    // The result JSON matters to the model; the human gets the summary
+    // line (ctrl+o expands, /workflows has the full dashboard).
+    renderResult(result, options, theme) {
+      const text = resultText(result);
+      return renderCompactResult({
+        theme,
+        expanded: options.expanded,
+        summary: previewOf(text, 1)[0] ?? "workflow finished",
+        fullText: text,
+      });
+    },
   });
 
   let demoWidgetTimer: ReturnType<typeof setTimeout> | undefined;
+
+  pi.registerTool({
+    name: "workflow_status",
+    label: "Workflow Status",
+    description: WORKFLOW_STATUS_DESCRIPTION,
+    parameters: Type.Object({
+      run_id: Type.String({ description: STATUS_PARAMETER_DESCRIPTIONS.runId }),
+    }),
+    async execute(_id, params) {
+      const run = activeRuns.get(params.run_id);
+      if (!run) {
+        const known = [...activeRuns.keys()];
+        throw new Error(
+          known.length > 0
+            ? `No run "${params.run_id}" in this session. Known runs: ${known.join(", ")}.`
+            : `No workflow runs in this session.`,
+        );
+      }
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: buildWorkflowStatus(run.record, {
+              currentPhase: run.currentPhase,
+              agents: [...run.agents.values()],
+              logs: run.logs,
+              dir: run.dir,
+            }),
+          },
+        ],
+        details: { runId: run.record.runId, status: run.record.status },
+      };
+    },
+    renderResult(result, options, theme) {
+      const text = resultText(result);
+      return renderCompactResult({
+        theme,
+        expanded: options.expanded,
+        summary: previewOf(text, 1)[0] ?? "no status",
+        fullText: text,
+      });
+    },
+  });
 
   pi.registerCommand("workflows", {
     description: "Inspect workflow runs (`/workflows demo` previews the UI)",

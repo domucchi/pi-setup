@@ -3,8 +3,12 @@
 export const TITLE_SYSTEM_PROMPT = [
   "You name coding sessions.",
   "Given the first user message of a session, output a short title:",
-  "2-4 words, at most 40 characters, the first word starts with uppercase.",
-  "Name the TASK, not the tool (e.g. \"fix flaky watchdog test\", not \"coding help\").",
+  "3-6 words, at most 44 characters, sentence case (capitalize ONLY the",
+  "first word; keep acronyms like MCP or UI uppercase).",
+  "Name the TASK, not the tool.",
+  "Good: \"Fix flaky watchdog test\", \"Assess webdev tooling gaps\",",
+  "\"Redesign workflow dashboard overlay\".",
+  "Bad: \"Coding Help\", \"Fix Flaky Watchdog Test\" (Title Case), \"Task\".",
   "Output ONLY the title — no quotes, no punctuation at the end, no explanation.",
 ].join("\n");
 
@@ -15,6 +19,22 @@ export const MAX_TITLE_CHARS = 48;
 export function buildTitleInput(text: string): string {
   const clipped = text.trim().slice(0, MAX_INPUT_CHARS);
   return `Name this session. First user message:\n\n${clipped}`;
+}
+
+/**
+ * Force sentence case: first word capitalized, simple Capitalized words
+ * lowercased. Acronyms (MCP, UI) and mixed-case names (GitHub,
+ * TypeScript) are left alone — cheap models love Title Case no matter
+ * what the prompt says, so this is enforced deterministically.
+ */
+export function sentenceCase(title: string): string {
+  return title
+    .split(" ")
+    .map((word, index) => {
+      if (index === 0) return word.charAt(0).toUpperCase() + word.slice(1);
+      return /^[A-Z][a-z]+$/.test(word) ? word.toLowerCase() : word;
+    })
+    .join(" ");
 }
 
 /**
@@ -30,7 +50,8 @@ export function sanitizeTitle(raw: string): string | undefined {
     const lastSpace = cut.lastIndexOf(" ");
     title = (lastSpace > 20 ? cut.slice(0, lastSpace) : cut).trim();
   }
-  return title || undefined;
+  if (!title) return undefined;
+  return sentenceCase(title);
 }
 
 /** Inputs that should not trigger naming (commands, bash, empty). */

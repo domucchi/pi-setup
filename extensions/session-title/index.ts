@@ -11,6 +11,7 @@
  * subagents), fire-and-forget — a failure just leaves the default title.
  */
 
+import { basename } from "node:path";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -34,27 +35,43 @@ export default function sessionTitle(pi: ExtensionAPI) {
   let generating = false;
   let attempts = 0;
   let session = 0; // guards delayed re-asserts across session switches
+  let sessionName: string | undefined;
+  let working = false;
 
-  // The user wants the tab to read as JUST the topic — core rebuilds
-  // "π - {name} - {folder}" on session_info_changed and session switches,
-  // so set our bare title after it and re-assert once shortly after.
-  const applyTitle = (ctx: ExtensionContext, name: string) => {
+  // Tab title = state glyph + topic (π when settled, ◆ while the agent
+  // works — the terminal tab has no icon API, so the glyph IS the icon).
+  // Core rebuilds "π - {name} - {folder}" on session_info_changed and
+  // session switches, so set ours after it and re-assert shortly after.
+  const applyTitle = (ctx: ExtensionContext) => {
     if (ctx.mode !== "tui") return;
+    const name = sessionName ?? basename(ctx.cwd);
+    const title = `${working ? "◆" : "π"} ${name}`;
     const current = session;
-    ctx.ui.setTitle(name);
+    ctx.ui.setTitle(title);
     setTimeout(() => {
-      if (session === current) ctx.ui.setTitle(name);
+      if (session === current) ctx.ui.setTitle(title);
     }, 250).unref?.();
   };
 
   pi.on("session_start", (_event, ctx) => {
     session += 1;
     // A resumed session keeps its earlier name; don't rename it.
-    const existing = ctx.sessionManager.getSessionName();
-    titled = Boolean(existing);
-    if (existing) applyTitle(ctx, existing);
+    sessionName = ctx.sessionManager.getSessionName() || undefined;
+    titled = Boolean(sessionName);
+    working = false;
     generating = false;
     attempts = 0;
+    applyTitle(ctx);
+  });
+
+  pi.on("agent_start", (_event, ctx) => {
+    working = true;
+    applyTitle(ctx);
+  });
+
+  pi.on("agent_settled", (_event, ctx) => {
+    working = false;
+    applyTitle(ctx);
   });
 
   async function generate(ctx: ExtensionContext, text: string) {
@@ -110,10 +127,11 @@ export default function sessionTitle(pi: ExtensionAPI) {
     // ReadonlySessionManager type hides the writer, but ctx holds the
     // real SessionManager — naming a session is exactly what this is for.
     // This also labels the session in /resume; the terminal tab itself
-    // gets the bare topic via applyTitle below.
+    // gets the glyph + topic via applyTitle below.
     (ctx.sessionManager as SessionManager).appendSessionInfo(title);
+    sessionName = title;
     titled = true;
-    applyTitle(ctx, title);
+    applyTitle(ctx);
   }
 
   pi.on("input", (event, ctx) => {

@@ -35,6 +35,7 @@ export function childExcludedTools() {
     "subagent_cancel",
     "subagent_list",
     "workflow",
+    "workflow_status",
     "ask_user",
     "bg_start",
     "bg_status",

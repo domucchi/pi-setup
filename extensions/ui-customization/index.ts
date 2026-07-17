@@ -74,12 +74,22 @@ export default function uiCustomization(pi: ExtensionAPI) {
   let version = ""; // resolved async from `pi --version`
   let stickyBottom = true;
 
-  // ---- Suppress the "Thinking level: X" chat status. pi appends it to
-  // the chat on every cycle, but the level is already live in our footer;
-  // in the chat it just piles up in scrollback. There is no core off
-  // switch, and removing it after the fact flickers (it survives a
+  // ---- Suppress model/thinking chat statuses. pi appends them to the
+  // chat on every cycle/switch, but both are already live in our footer;
+  // in the chat they just pile up in scrollback. There is no core off
+  // switch, and removing them after the fact flickers (they survive a
   // frame), so we wrap each container's addChild and swallow the status
   // BEFORE it ever renders — plus the blank spacer added just before it.
+  // showStatus also has a fast path that MUTATES the previous status line
+  // via setText instead of adding a new one, so Texts that pass through
+  // the wrapper get their setText filtered too.
+  const SUPPRESSED_STATUS = [
+    /^Thinking level: \S+$/,
+    /^Model: \S+$/,
+    /^Switched to .+$/,
+  ];
+  const isSuppressedStatus = (text: string) =>
+    SUPPRESSED_STATUS.some((pattern) => pattern.test(text));
   const FILTER_FLAG = "__piThinkingStatusFilter";
   const isBlank = (component: Component | undefined) => {
     const lines = component?.render?.(10);
@@ -112,11 +122,30 @@ export default function uiCustomization(pi: ExtensionAPI) {
             const lines = component?.render?.(120);
             if (Array.isArray(lines)) {
               const text = lines.join("\n").replace(ANSI_PATTERN, "").trim();
-              if (/^Thinking level: \S+$/.test(text)) {
+              if (isSuppressedStatus(text)) {
                 const last = container.children!.at(-1);
                 if (last && isBlank(last)) container.removeChild!(last);
                 return;
               }
+            }
+            // Guard the in-place mutation path: showStatus reuses the
+            // previous status Text via setText when it is still last.
+            const mutable = component as unknown as {
+              setText?: ((value: string) => void) & { [FILTER_FLAG]?: boolean };
+            };
+            if (
+              typeof mutable.setText === "function" &&
+              !mutable.setText[FILTER_FLAG]
+            ) {
+              const originalSetText = mutable.setText.bind(component);
+              const wrappedSetText = ((value: string) => {
+                const stripped = value.replace(ANSI_PATTERN, "").trim();
+                // Keep the previous text instead of showing the status.
+                if (isSuppressedStatus(stripped)) return;
+                originalSetText(value);
+              }) as ((value: string) => void) & { [FILTER_FLAG]?: boolean };
+              wrappedSetText[FILTER_FLAG] = true;
+              mutable.setText = wrappedSetText;
             }
           } catch {
             // On any doubt, fall through to the normal add.

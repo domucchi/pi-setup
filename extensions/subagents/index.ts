@@ -15,6 +15,7 @@ import type {
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { renderCompactResult, resultText } from "../shared/compact-result.ts";
 import type { OverlayTheme } from "../shared/overlay.ts";
 import { showSubagentsDashboard } from "./dashboard.ts";
 import { createDemoSubagents, demoSubagentsHost } from "./src/demo.ts";
@@ -246,9 +247,10 @@ export default function subagents(pi: ExtensionAPI) {
     await manager.disposeAll();
   });
 
+  // Completion follow-ups collapse to their header line; ctrl+o expands.
   pi.registerMessageRenderer<CompletionDetails>(
     RESULT_MESSAGE_TYPE,
-    (message, _options, theme) => {
+    (message, options, theme) => {
       const ok = message.details?.status === "idle";
       const icon = ok ? theme.fg("success", "◆ ") : theme.fg("warning", "◆ ");
       const text =
@@ -257,7 +259,16 @@ export default function subagents(pi: ExtensionAPI) {
           : (message.content?.find((c) => c.type === "text") as
               | { text: string }
               | undefined)?.text ?? "";
-      return new Text(icon + theme.fg("text", text), 0, 0);
+      if (options.expanded) {
+        return new Text(icon + theme.fg("text", text), 0, 0);
+      }
+      const [first = "", ...rest] = text.split("\n");
+      const more = rest.some((line) => line.trim() !== "");
+      return new Text(
+        icon + theme.fg("text", first) + (more ? theme.fg("dim", " …") : ""),
+        0,
+        0,
+      );
     },
   );
 
@@ -357,6 +368,22 @@ export default function subagents(pi: ExtensionAPI) {
         content: [{ type: "text" as const, text: buildWaitResult(snapshots) }],
         details: { ids: params.ids },
       };
+    },
+    // Full reports are for the model; the human gets the report headers
+    // (ctrl+o expands, /subagents has the full dashboard).
+    renderResult(result, options, theme) {
+      const text = resultText(result);
+      const headers = text
+        .split("\n")
+        .filter((line) => line.startsWith("## "))
+        .map((line) => line.slice(3));
+      return renderCompactResult({
+        theme,
+        expanded: options.expanded,
+        summary: `→ ${headers.length || "no"} report${headers.length === 1 ? "" : "s"}`,
+        fullText: text,
+        previewLines: headers,
+      });
     },
   });
 

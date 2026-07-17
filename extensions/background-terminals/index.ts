@@ -194,9 +194,10 @@ export default function backgroundTerminals(pi: ExtensionAPI) {
     manager.disposeAll();
   });
 
+  // Exit follow-ups collapse to their header line; ctrl+o expands.
   pi.registerMessageRenderer<CompletionDetails>(
     RESULT_MESSAGE_TYPE,
-    (message, _options, theme) => {
+    (message, options, theme) => {
       const details = message.details;
       const ok = details?.status === "done";
       const icon = ok ? theme.fg("success", "✓ ") : theme.fg("warning", "✗ ");
@@ -206,7 +207,16 @@ export default function backgroundTerminals(pi: ExtensionAPI) {
           : (message.content?.find((c) => c.type === "text") as
               | { text: string }
               | undefined)?.text ?? "";
-      return new Text(icon + theme.fg("text", text), 0, 0);
+      if (options.expanded) {
+        return new Text(icon + theme.fg("text", text), 0, 0);
+      }
+      const [first = "", ...rest] = text.split("\n");
+      const more = rest.some((line) => line.trim() !== "");
+      return new Text(
+        icon + theme.fg("text", first) + (more ? theme.fg("dim", " …") : ""),
+        0,
+        0,
+      );
     },
   );
 

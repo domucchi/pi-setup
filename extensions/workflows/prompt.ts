@@ -40,8 +40,79 @@ export const PARAMETER_DESCRIPTIONS = {
   name: "Saved workflow name, resolved from .pi/workflows/<name>.js then .claude/workflows/<name>.js.",
   args: "Value exposed to the script as the global `args` (JSON-serializable).",
   background:
-    "Run in the background: returns the runId immediately; the result arrives as a follow-up message when the run settles.",
+    "Run in the background: returns the runId immediately; the result arrives as a follow-up message when the run settles. Poll progress with workflow_status in the meantime.",
 };
+
+export const WORKFLOW_STATUS_DESCRIPTION =
+  "Check on a workflow run without blocking: live phase and per-agent states " +
+  "for a running background workflow, or the recorded outcome of a finished one. " +
+  "Use this to poll progress after starting a workflow with background: true; " +
+  "the final result still arrives as a follow-up message when the run settles.";
+
+export const STATUS_PARAMETER_DESCRIPTIONS = {
+  runId: "The runId returned when the workflow was started.",
+};
+
+export interface StatusAgent {
+  seq: number;
+  label: string;
+  phase?: string;
+  state: "running" | "ok" | "failed";
+  model?: string;
+  tokens?: number;
+  toolCalls?: number;
+  startedAt: number;
+  durationMs?: number;
+  error?: string;
+}
+
+/** Model-facing live snapshot of a run (also collapsed for the human). */
+export function buildWorkflowStatus(
+  record: RunRecord,
+  extras: {
+    currentPhase?: string;
+    agents: StatusAgent[];
+    logs: string[];
+    dir: string;
+  },
+) {
+  const settled = extras.agents.filter((a) => a.state !== "running").length;
+  const elapsed = Math.round(
+    ((record.settledAt ?? Date.now()) - record.startedAt) / 1000,
+  );
+  const lines = [
+    `Workflow "${record.name}" (${record.runId}) — ${record.status}, ${settled}/${record.agentCount} agents settled, ${elapsed}s.`,
+  ];
+  if (record.error) lines.push(`Error: ${record.error}`);
+  if (record.status === "running" && extras.currentPhase) {
+    lines.push(`Current phase: ${extras.currentPhase}`);
+  }
+  for (const agent of extras.agents) {
+    const icon = agent.state === "running" ? "◆" : agent.state === "ok" ? "✓" : "✗";
+    const seconds = Math.round(
+      (agent.durationMs ?? Date.now() - agent.startedAt) / 1000,
+    );
+    const stats = [
+      agent.phase,
+      agent.model,
+      agent.tokens !== undefined ? `${agent.tokens} tok` : undefined,
+      agent.toolCalls ? `${agent.toolCalls} tool calls` : undefined,
+      `${seconds}s`,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    lines.push(
+      `${icon} ${agent.label} — ${stats}${agent.error ? ` — ${agent.error.slice(0, 120)}` : ""}`,
+    );
+  }
+  const logs = extras.logs.slice(-3);
+  if (logs.length > 0) {
+    lines.push("", "Recent log:");
+    lines.push(...logs.map((l) => `  ${l}`));
+  }
+  lines.push("", `Artifacts: ${extras.dir}`);
+  return lines.join("\n");
+}
 
 export function buildRunResult(record: RunRecord, value: unknown, dir: string) {
   const lines = [

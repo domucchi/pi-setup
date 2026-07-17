@@ -2,9 +2,63 @@
 
 ## State (2026-07-17)
 
-Functionally complete harness (9 hand-written extensions + MCP via
-pi-mcp-adapter) with the full UI pass DONE. 174 vitest tests, tsc clean.
+Functionally complete harness (10 hand-written extensions + MCP via
+pi-mcp-adapter) with the full UI pass DONE. 186 vitest tests, tsc clean.
 See `PLAN.md` for architecture/decisions; `README.md`/`SETUP.md` for the map.
+
+## NEXT: the two big builds (user-approved, in priority order)
+
+### 1. Browser extension (hand-written on the playwright npm LIBRARY)
+
+Decision made: NO playwright-mcp — tool descriptions/output discipline
+must be ours (same reasoning as web-access vs Firecrawl). playwright
+package itself is pure plumbing (allowed, like pi-mcp-adapter).
+Shape: `extensions/browser/` with ~5 tools — browser_goto,
+browser_snapshot (capped a11y tree), browser_click, browser_type,
+browser_screenshot (pi tool results support ImageContent → renders
+in-terminal). One lazily-launched persistent context per session,
+disposed on session_shutdown; SSRF-style URL guard reused from
+web-access; caps + spill like file-search. Compact renderResult from
+the start. Child agents SHOULD get these tools (worker role).
+
+### 2. claude/codex subagent backends
+
+Decision made: bypassPermissions is FINE (user: permission prompts are
+bloat; real sandboxing later). Reference: davis's
+`reference/my-pi-setup/extensions/subagents/src/backends/{claude,codex}.ts`
+— claude uses @anthropic-ai/claude-agent-sdk `query()` streaming with
+permissionMode bypassPermissions; codex spawns the `codex` CLI parsing
+JSON events. Our seam: implement `ChildHandle` (subagents/src/child.ts)
+per backend — manager, dashboards, widgets, result delivery all reuse.
+Plumb `backend: "pi" | "claude" | "codex"` through agents/*.md role
+definitions + subagent_spawn param. Telemetry mapping: their events →
+run-started/activity/run-settled (+ usage where available). Workflows
+get backends for free via createChild-compatible wiring. Motivation:
+Claude models unavailable in pi directly; codex brings computer use.
+
+### Round 3 additions (same day)
+
+- Collapsed agent outputs: workflow/workflow_status/subagent_wait tool
+  results + workflow/subagent/bg follow-up messages render as summary
+  lines (ctrl+o expands; message renderers get `expanded` too).
+- workflow_status tool (poll background runs; denied to children) and
+  full agent prompts persisted in run artifacts (agents/<seq>.json).
+- ask_user redesigned: 1-5 questions per call, CC-style tab bar
+  (← ☒/☐ headers · ✓ Submit →), single-select auto-advances,
+  multi_select with explicit "✓ Done — continue" row (enter toggles, so
+  Done is the ONLY way to finish a single multi-select question —
+  learned the hard way), review page on Submit. Pure state in
+  src/form.ts.
+- todos extension (10th): todo_write, CC TodoWrite semantics (full-list
+  replace); checklist in chat + live aboveEditor widget (all-done
+  lingers 60s). SGR 9 strikethrough for completed.
+- Model/thinking status suppression hardened: also swallows "Model: X" /
+  "Switched to …", AND wraps setText — showStatus mutates the previous
+  status line in place when it is still last (the add-path filter alone
+  broke after the first allowed status landed).
+- Session titles: sentence-cased deterministically (luna Title-Cases no
+  matter the prompt), 3-6 words; tab shows state glyph — ◆ working,
+  π settled.
 
 ### Round 2 additions (same day)
 

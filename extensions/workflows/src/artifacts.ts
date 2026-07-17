@@ -45,6 +45,8 @@ export interface JournalEntry {
 export interface AgentResultArtifact {
   seq: number;
   ok: boolean;
+  /** The full prompt the agent ran with — for inspection and replay. */
+  prompt?: string;
   output?: string;
   structured?: unknown;
   error?: string;
