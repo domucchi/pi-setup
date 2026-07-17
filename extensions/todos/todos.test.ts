@@ -41,15 +41,37 @@ describe("allDone", () => {
 });
 
 describe("displayWindow", () => {
-  it("passes small lists through and counts hidden overflow", () => {
-    const todos = Array.from({ length: 12 }, (_, i) => todo("pending", `t${i}`));
-    expect(displayWindow(todos.slice(0, 3), 10)).toEqual({
-      shown: todos.slice(0, 3),
+  it("passes small lists through untouched", () => {
+    const todos = [todo("completed"), todo("in_progress"), todo("pending")];
+    expect(displayWindow(todos, 6)).toEqual({
+      doneCollapsed: 0,
+      shown: todos,
       hidden: 0,
     });
-    const windowed = displayWindow(todos, 10);
-    expect(windowed.shown).toHaveLength(10);
+  });
+
+  it("collapses leading done items so the work front stays visible", () => {
+    const todos = [
+      todo("completed", "d1"),
+      todo("completed", "d2"),
+      todo("completed", "d3"),
+      todo("in_progress", "current"),
+      ...Array.from({ length: 6 }, (_, i) => todo("pending", `p${i}`)),
+    ];
+    const windowed = displayWindow(todos, 6);
+    expect(windowed.doneCollapsed).toBe(3);
+    expect(windowed.shown[0].text).toBe("current");
+    expect(windowed.shown).toHaveLength(5); // 6 rows − 1 done-summary line
     expect(windowed.hidden).toBe(2);
+  });
+
+  it("shows the tail when everything is completed", () => {
+    const todos = Array.from({ length: 10 }, (_, i) => todo("completed", `d${i}`));
+    const windowed = displayWindow(todos, 6);
+    expect(windowed.doneCollapsed).toBe(5);
+    expect(windowed.shown[0].text).toBe("d5");
+    expect(windowed.shown).toHaveLength(5);
+    expect(windowed.hidden).toBe(0);
   });
 });
 

@@ -25,12 +25,13 @@ import {
   extraInProgress,
   MAX_TODOS,
   strike,
+  summarize,
   type Todo,
 } from "./src/todos.ts";
 
 const WIDGET_LINGER_MS = 60_000;
 const WIDGET_TICK_MS = 5_000;
-const WIDGET_MAX_LINES = 10;
+const WIDGET_MAX_LINES = 6;
 
 /** One checklist line, CC-style: struck done, bold current, quiet pending. */
 function todoLine(theme: OverlayTheme, todo: Todo): string {
@@ -53,10 +54,16 @@ export default function todos(pi: ExtensionAPI) {
   let nudgeWidget: (() => void) | undefined;
 
   const widgetLines = (theme: OverlayTheme, width: number): string[] => {
-    const { shown, hidden } = displayWindow(list, WIDGET_MAX_LINES);
-    const lines = shown.map((todo) =>
-      truncateToWidth(todoLine(theme, todo), width),
-    );
+    const { doneCollapsed, shown, hidden } = displayWindow(list, WIDGET_MAX_LINES);
+    const lines: string[] = [];
+    if (doneCollapsed > 0) {
+      lines.push(
+        ` ${theme.fg("success", "✓")} ${theme.fg("dim", `${doneCollapsed} done`)}`,
+      );
+    }
+    for (const todo of shown) {
+      lines.push(truncateToWidth(todoLine(theme, todo), width));
+    }
     if (hidden > 0) lines.push(theme.fg("dim", `   … +${hidden} more`));
     return lines;
   };
@@ -162,13 +169,21 @@ export default function todos(pi: ExtensionAPI) {
     renderCall(_args, theme) {
       return new Text(theme.fg("toolTitle", theme.bold("todos")), 0, 0);
     },
-    // The checklist itself is the useful rendering (like Claude Code).
-    renderResult(result, _options, theme) {
+    // The live checklist sits above the input; the tool result only
+    // needs a summary line (ctrl+o still shows the full list).
+    renderResult(result, options, theme) {
       const stored = (result.details as { todos?: Todo[] } | undefined)?.todos;
       if (!stored || stored.length === 0) {
         return new Text(theme.fg("dim", "✓ todo list cleared"), 0, 0);
       }
-      return new Text(stored.map((todo) => todoLine(theme, todo)).join("\n"), 0, 0);
+      if (options.expanded) {
+        return new Text(
+          stored.map((todo) => todoLine(theme, todo)).join("\n"),
+          0,
+          0,
+        );
+      }
+      return new Text(theme.fg("dim", `→ ${summarize(stored)}`), 0, 0);
     },
   });
 }

@@ -60,14 +60,31 @@ export function strike(text: string): string {
   return `\x1b[9m${text}\x1b[29m`;
 }
 
+export interface TodoWindow {
+  /** Leading completed items collapsed into one "✓ N done" line. */
+  doneCollapsed: number;
+  shown: Todo[];
+  /** Trailing items beyond the cap ("… +N more"). */
+  hidden: number;
+}
+
 /**
- * Trim the display list to `max` lines: everything if it fits, else the
- * first `max` in given order plus an overflow marker count.
+ * Trim the display list to ~`max` rows while keeping the WORK FRONT
+ * visible: leading completed items collapse into a single summary line
+ * (they'd otherwise push the in_progress item off the cap), then the
+ * list from the first open item forward, then an overflow count.
  */
-export function displayWindow(
-  todos: Todo[],
-  max: number,
-): { shown: Todo[]; hidden: number } {
-  if (todos.length <= max) return { shown: todos, hidden: 0 };
-  return { shown: todos.slice(0, max), hidden: todos.length - max };
+export function displayWindow(todos: Todo[], max: number): TodoWindow {
+  if (todos.length <= max) return { doneCollapsed: 0, shown: todos, hidden: 0 };
+  const firstOpen = todos.findIndex((t) => t.status !== "completed");
+  // All done: show the tail; the collapsed-head summary line costs a row.
+  const start =
+    firstOpen === -1 ? Math.max(1, todos.length - (max - 1)) : firstOpen;
+  const budget = Math.max(1, max - (start > 0 ? 1 : 0));
+  const shown = todos.slice(start, start + budget);
+  return {
+    doneCollapsed: start,
+    shown,
+    hidden: todos.length - start - shown.length,
+  };
 }
