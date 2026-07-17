@@ -16,6 +16,7 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { renderCompactResult, resultText } from "../shared/compact-result.ts";
+import { sortRunningFirst } from "../shared/agent-format.ts";
 import type { OverlayTheme } from "../shared/overlay.ts";
 import { showSubagentsDashboard } from "./dashboard.ts";
 import { createDemoSubagents, demoSubagentsHost } from "./src/demo.ts";
@@ -499,7 +500,12 @@ export default function subagents(pi: ExtensionAPI) {
         return;
       }
       await showSubagentsDashboard(ctx, {
-        list: () => manager.list(),
+        list: () =>
+          sortRunningFirst(
+            manager.list(),
+            (s) => s.status === "working",
+            (s) => s.startedAt,
+          ),
         transcriptTail: (id, lines) => manager.transcriptTail(id, lines),
         cancel: (id) => {
           // Mirror the subagent_cancel tool: suppress the pending

@@ -18,6 +18,7 @@ import {
   renderCompactResult,
   resultText,
 } from "../shared/compact-result.ts";
+import { sortRunningFirst } from "../shared/agent-format.ts";
 import type { OverlayTheme } from "../shared/overlay.ts";
 import { showWorkflowsDashboard, type RunView } from "./dashboard.ts";
 import { createDemoRuns, demoWorkflowsHost } from "./src/demo.ts";
@@ -629,9 +630,11 @@ export default function workflows(pi: ExtensionAPI) {
       });
       await showWorkflowsDashboard(ctx, {
         getRuns: () =>
-          [...activeRuns.values()]
-            .sort((a, b) => b.record.startedAt - a.record.startedAt)
-            .map(toView),
+          sortRunningFirst(
+            [...activeRuns.values()],
+            (run) => run.record.status === "running",
+            (run) => run.record.startedAt,
+          ).map(toView),
         stop: (runId) => activeRuns.get(runId)?.abort.abort(),
       });
     },

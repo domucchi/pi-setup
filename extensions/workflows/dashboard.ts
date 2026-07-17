@@ -334,10 +334,22 @@ class WorkflowsDashboard {
     }
 
     const window = windowSlice(runs, this.listIndex, bodyHeight);
-    const rows = window.items.map((run, i) => {
+    const rows: string[] = [];
+    let dividerDrawn = false;
+    for (const [i, run] of window.items.entries()) {
       const index = window.offset + i;
-      const selected = index === this.listIndex;
       const record = run.record;
+      // Thin divider where the running block ends (list is running-first).
+      if (
+        !dividerDrawn &&
+        record.status !== "running" &&
+        index > 0 &&
+        runs[index - 1]?.record.status === "running"
+      ) {
+        rows.push(theme.fg("borderMuted", ` ${"─".repeat(Math.max(0, width - 4))}`));
+        dividerDrawn = true;
+      }
+      const selected = index === this.listIndex;
       const marker = selected ? theme.fg("accent", "❯") : " ";
       const icon = theme.fg(
         statusColorKey(record.status),
@@ -353,12 +365,14 @@ class WorkflowsDashboard {
         theme.fg("dim", `${settled}/${counts.total} agents · ${elapsed} · `) +
         theme.fg(statusColorKey(record.status), statusWord(record.status)) +
         " ";
-      return split(
-        ` ${marker} ${icon} ${name} ${theme.fg("dim", record.runId)}`,
-        right,
-        width - 2,
+      rows.push(
+        split(
+          ` ${marker} ${icon} ${name} ${theme.fg("dim", record.runId)}`,
+          right,
+          width - 2,
+        ),
       );
-    });
+    }
     lines.push(...panel(theme, "Runs", rows, width, panelHeight));
     lines.push(
       this.hintLine("↑↓ select · enter open · x stop · esc close", width),

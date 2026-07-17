@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  sortRunningFirst,
   formatDuration,
   formatTokens,
   promptPreview,
@@ -85,5 +86,40 @@ describe("windowSlice", () => {
   it("clamps at the edges", () => {
     expect(windowSlice(items, 0, 4).offset).toBe(0);
     expect(windowSlice(items, 9, 4).offset).toBe(6);
+  });
+});
+
+describe("sortRunningFirst", () => {
+  const item = (running: boolean, startedAt: number, id: string) => ({
+    running,
+    startedAt,
+    id,
+  });
+
+  it("puts running first, then most-recent within each group", () => {
+    const items = [
+      item(false, 30, "done-new"),
+      item(true, 10, "run-old"),
+      item(false, 5, "done-old"),
+      item(true, 20, "run-new"),
+    ];
+    const sorted = sortRunningFirst(
+      items,
+      (i) => i.running,
+      (i) => i.startedAt,
+    );
+    expect(sorted.map((i) => i.id)).toEqual([
+      "run-new",
+      "run-old",
+      "done-new",
+      "done-old",
+    ]);
+  });
+
+  it("does not mutate the input", () => {
+    const items = [item(false, 1, "a"), item(true, 2, "b")];
+    const copy = [...items];
+    sortRunningFirst(items, (i) => i.running, (i) => i.startedAt);
+    expect(items).toEqual(copy);
   });
 });

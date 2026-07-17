@@ -285,8 +285,19 @@ class SubagentsDashboard {
       Math.max(0, ...agents.map((s) => s.title.length)),
     );
     const rows: string[] = [];
+    let dividerDrawn = false;
     for (const [i, snapshot] of window.items.entries()) {
       const index = window.offset + i;
+      // Thin divider where the running block ends (list is running-first).
+      if (
+        !dividerDrawn &&
+        snapshot.status !== "working" &&
+        index > 0 &&
+        agents[index - 1]?.status === "working"
+      ) {
+        rows.push(theme.fg("borderMuted", ` ${"─".repeat(Math.max(0, width - 4))}`));
+        dividerDrawn = true;
+      }
       const selected = index === this.listIndex;
       const marker = selected ? theme.fg("accent", "❯") : " ";
       const icon = theme.fg(
