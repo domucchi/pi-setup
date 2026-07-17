@@ -4,9 +4,17 @@ This repo becomes the contents of `~/.pi/agent` via symlinks, so edits
 here take effect the next time pi starts — no copy step, and the harness
 stays versioned in git.
 
+## Prerequisites
+
+- Node.js 22.19 or newer and npm.
+- [pi](https://pi.dev) installed and available as `pi`.
+- A POSIX shell (the installer is tested with Bash on macOS).
+
 ## Install
 
 ```sh
+git clone https://github.com/domucchi/pi-setup.git
+cd pi-setup
 ./install.sh
 ```
 

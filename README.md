@@ -1,8 +1,11 @@
 # pi-setup
 
-A personal [pi](https://pi.dev) coding-agent harness, built by hand in
-plain TypeScript. Everything that shapes agent behavior is written here
-rather than installed as a package.
+[![CI](https://github.com/domucchi/pi-setup/actions/workflows/ci.yml/badge.svg)](https://github.com/domucchi/pi-setup/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+
+An opinionated, batteries-included [pi](https://pi.dev) coding-agent harness,
+built in plain TypeScript. Everything that shapes agent behavior is written
+here rather than hidden inside a package.
 
 ## Extensions
 
@@ -41,7 +44,23 @@ servers in `~/.pi/agent/mcp.json`. See [SETUP.md](./SETUP.md).
 
 See [SETUP.md](./SETUP.md). Short version: run `./install.sh`.
 
+## Trust and security
+
+pi extensions run with the permissions of the pi process. Review the code and
+configured MCP servers before use. The optional Claude and Codex subagent
+backends intentionally run without interactive permission prompts; see
+[SECURITY.md](./SECURITY.md) for reporting vulnerabilities.
+
 ## Design
 
-`PLAN.md` records the decisions and pattern library; each larger
-extension has its own `DESIGN.md`.
+`PLAN.md` records the decisions and pattern library; each larger extension has
+its own `DESIGN.md`.
+
+## Contributing
+
+Contributions are welcome. Read [CONTRIBUTING.md](./CONTRIBUTING.md) before
+opening a pull request.
+
+## License
+
+[MIT](./LICENSE)

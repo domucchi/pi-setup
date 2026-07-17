@@ -1,5 +1,32 @@
-.DS_Store
+# Dependencies and generated output
 node_modules/
+coverage/
+dist/
 reference/
+
+# Local environment and agent configuration
 .env
+.env.*
+!.env.example
 mcp.json
+mcp.local.json
+settings.json
+extensions/herdr-agent-state.ts
+
+# Credentials and browser auth state
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+.npmrc
+.pypirc
+.netrc
+playwright/.auth/
+auth-state/
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/

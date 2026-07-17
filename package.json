@@ -27,5 +27,24 @@
   },
   "engines": {
     "node": ">=22.19.0"
-  }
+  },
+  "description": "An opinionated pi coding-agent harness with TypeScript extensions for subagents, workflows, browser automation, web access, and terminal tooling.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/domucchi/pi-setup.git"
+  },
+  "bugs": {
+    "url": "https://github.com/domucchi/pi-setup/issues"
+  },
+  "homepage": "https://github.com/domucchi/pi-setup#readme",
+  "keywords": [
+    "pi",
+    "coding-agent",
+    "ai-agents",
+    "typescript",
+    "developer-tools",
+    "playwright",
+    "mcp"
+  ]
 }
