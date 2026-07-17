@@ -13,14 +13,14 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { liveDetailView } from "../shared/live-detail.ts";
-import { livePicker } from "../shared/live-picker.ts";
+import type { OverlayTheme } from "../shared/overlay.ts";
+import { showWorkflowsDashboard, type RunView } from "./dashboard.ts";
+import { createDemoRuns, demoWorkflowsHost } from "./src/demo.ts";
+import { statusColorKey, statusWord } from "./src/view.ts";
 import {
   buildBackgroundFailureMessage,
   buildBackgroundStartMessage,
-  buildRunDetailLines,
   buildRunResult,
-  describeRun,
   PARAMETER_DESCRIPTIONS,
   WORKFLOW_DESCRIPTION,
   WORKFLOW_PROMPT_GUIDELINES,
@@ -32,26 +32,39 @@ import {
   newRunId,
   type RunRecord,
 } from "./src/artifacts.ts";
-import { extractMeta } from "./src/meta.ts";
+import { extractMeta, type WorkflowPhase } from "./src/meta.ts";
 import { resolveNamedWorkflow } from "./src/named.ts";
 import { createAgentRunner, type RunnerEvent } from "./src/runner.ts";
 import { runWorkflowSandbox, type SandboxResult } from "./src/sandbox.ts";
 
 const MAX_AGENT_CALLS = 32;
+const MAX_AGENT_ACTIVITY = 8;
 const RESULT_MESSAGE_TYPE = "workflow-result";
 
-interface ActiveAgent {
+export interface ActiveAgent {
   seq: number;
   label: string;
   phase?: string;
   state: "running" | "ok" | "failed";
+  prompt?: string;
+  agentType?: string;
+  model?: string;
+  tokens?: number;
+  contextWindow?: number;
+  toolCalls?: number;
+  /** Recent tool-call previews, newest last. */
+  activity: string[];
+  startedAt: number;
   error?: string;
   durationMs?: number;
+  /** Head of the agent's return value (full text in the run's artifacts). */
+  output?: string;
 }
 
-interface ActiveRun {
+export interface ActiveRun {
   record: RunRecord;
   dir: string;
+  phases?: WorkflowPhase[];
   currentPhase?: string;
   agents: Map<number, ActiveAgent>;
   logs: string[];
@@ -76,19 +89,110 @@ export default function workflows(pi: ExtensionAPI) {
     else pendingResults.set(runId, text);
   };
 
+  // ---- Indicator UNDER the input: one line per run with per-state agent
+  // counts; settled runs linger for a minute with their outcome, then drop
+  // (they stay in /workflows). Hidden once nothing is running or lingering.
+  const WIDGET_LINGER_MS = 60_000;
+  const WIDGET_TICK_MS = 5_000;
+  let widgetVisible = false;
+  let widgetTimer: ReturnType<typeof setInterval> | undefined;
+  let nudgeWidget: (() => void) | undefined;
+
+  interface WidgetRun {
+    name: string;
+    phase?: string;
+    status: RunRecord["status"];
+    running: number;
+    done: number;
+    failed: number;
+  }
+
+  // One line builder for the real widget and the /workflows demo one.
+  const widgetLines = (theme: OverlayTheme, runs: WidgetRun[]) =>
+    runs.map((run) => {
+      const parts = [theme.fg("accent", "▸ ") + theme.fg("text", run.name)];
+      if (run.status === "running") {
+        if (run.phase) parts.push(theme.fg("muted", run.phase));
+        if (run.running > 0) {
+          parts.push(theme.fg("warning", `◆ ${run.running} running`));
+        }
+        if (run.done > 0) parts.push(theme.fg("success", `✓ ${run.done} done`));
+        if (run.failed > 0) {
+          parts.push(theme.fg("error", `✗ ${run.failed} failed`));
+        }
+      } else {
+        const icon = run.status === "completed" ? "✓" : run.status === "failed" ? "✗" : "·";
+        parts.push(
+          theme.fg(statusColorKey(run.status), `${icon} ${statusWord(run.status)}`),
+        );
+      }
+      parts.push(theme.fg("dim", "/workflows to manage"));
+      return ` ${parts.join(theme.fg("dim", " · "))}`;
+    });
+
+  const widgetRuns = (): WidgetRun[] => {
+    const now = Date.now();
+    const rows: WidgetRun[] = [];
+    for (const run of activeRuns.values()) {
+      const record = run.record;
+      if (
+        record.status !== "running" &&
+        (record.settledAt === null || now - record.settledAt > WIDGET_LINGER_MS)
+      ) {
+        continue;
+      }
+      const row: WidgetRun = {
+        name: record.name,
+        phase: run.currentPhase,
+        status: record.status,
+        running: 0,
+        done: 0,
+        failed: 0,
+      };
+      for (const agent of run.agents.values()) {
+        if (agent.state === "running") row.running += 1;
+        else if (agent.state === "ok") row.done += 1;
+        else row.failed += 1;
+      }
+      rows.push(row);
+    }
+    return rows;
+  };
+
+  // The widget is set ONCE per visible spell (render() pulls fresh rows);
+  // re-setting on every change would reorder it against other widgets. The
+  // ticker re-renders so lingering runs expire without user activity.
   const updateWidget = () => {
     if (!currentCtx) return;
-    const running = [...activeRuns.values()].filter(
-      (run) => run.record.status === "running",
-    );
+    const visible = widgetRuns().length > 0;
+    if (!visible) {
+      if (widgetVisible) currentCtx.ui.setWidget("workflows", undefined);
+      widgetVisible = false;
+      nudgeWidget = undefined;
+      if (widgetTimer) {
+        clearInterval(widgetTimer);
+        widgetTimer = undefined;
+      }
+      return;
+    }
+    if (!widgetTimer) {
+      widgetTimer = setInterval(() => {
+        updateWidget();
+        nudgeWidget?.();
+      }, WIDGET_TICK_MS);
+    }
+    if (widgetVisible) return;
+    widgetVisible = true;
     currentCtx.ui.setWidget(
       "workflows",
-      running.length > 0
-        ? running.map(
-            (run) =>
-              ` ▸ workflow ${run.record.name}${run.currentPhase ? ` · ${run.currentPhase}` : ""} · ${[...run.agents.values()].filter((a) => a.state === "running").length} agent(s) · /workflows`,
-          )
-        : undefined,
+      (tui, theme) => {
+        nudgeWidget = () => tui.requestRender();
+        return {
+          invalidate() {},
+          render: () => widgetLines(theme, widgetRuns()),
+        };
+      },
+      { placement: "belowEditor" },
     );
   };
 
@@ -104,6 +208,12 @@ export default function workflows(pi: ExtensionAPI) {
   pi.on("session_shutdown", () => {
     currentCtx = undefined;
     pendingResults.clear();
+    if (widgetTimer) {
+      clearInterval(widgetTimer);
+      widgetTimer = undefined;
+    }
+    widgetVisible = false;
+    nudgeWidget = undefined;
     for (const run of activeRuns.values()) {
       run.abort.abort();
       if (run.record.status === "running") {
@@ -148,7 +258,14 @@ export default function workflows(pi: ExtensionAPI) {
       settledAt: null,
       agentCount: 0,
     };
-    const run: ActiveRun = { record, dir: store.dir, agents: new Map(), logs: [], abort };
+    const run: ActiveRun = {
+      record,
+      dir: store.dir,
+      phases: meta.phases,
+      agents: new Map(),
+      logs: [],
+      abort,
+    };
     activeRuns.set(runId, run);
     updateWidget();
 
@@ -180,13 +297,34 @@ export default function workflows(pi: ExtensionAPI) {
             label: event.label,
             phase: event.phase,
             state: "running",
+            prompt: event.prompt,
+            agentType: event.agentType,
+            activity: [],
+            startedAt: Date.now(),
           });
+        } else if (event.state === "activity") {
+          const agent = run.agents.get(event.seq);
+          if (agent) {
+            if (event.preview) {
+              agent.activity.push(event.preview);
+              if (agent.activity.length > MAX_AGENT_ACTIVITY) agent.activity.shift();
+            }
+            agent.model = event.model ?? agent.model;
+            agent.tokens = event.tokens ?? agent.tokens;
+            agent.contextWindow = event.contextWindow ?? agent.contextWindow;
+            agent.toolCalls = event.toolCalls ?? agent.toolCalls;
+          }
         } else {
           const agent = run.agents.get(event.seq);
           if (agent) {
             agent.state = event.ok ? "ok" : "failed";
             agent.error = event.error;
             agent.durationMs = event.durationMs;
+            agent.output = event.output?.slice(0, 2_000);
+            agent.model = event.model ?? agent.model;
+            agent.tokens = event.tokens ?? agent.tokens;
+            agent.contextWindow = event.contextWindow ?? agent.contextWindow;
+            agent.toolCalls = event.toolCalls ?? agent.toolCalls;
           }
           const hashes = requestMeta.get(event.seq);
           // Persist the full outcome so a future resume can replay this
@@ -359,41 +497,66 @@ export default function workflows(pi: ExtensionAPI) {
     },
   });
 
+  let demoWidgetTimer: ReturnType<typeof setTimeout> | undefined;
+
   pi.registerCommand("workflows", {
-    description: "Inspect workflow runs",
-    handler: async (_args, ctx) => {
+    description: "Inspect workflow runs (`/workflows demo` previews the UI)",
+    handler: async (args, ctx) => {
+      if (args?.trim() === "demo") {
+        // Fixture-backed preview: same dashboard + widget code paths,
+        // no real agents. The widget lingers so it can be seen under
+        // the input after the overlay closes.
+        if (demoWidgetTimer) clearTimeout(demoWidgetTimer);
+        ctx.ui.setWidget(
+          "workflows-demo",
+          (_tui, theme) => ({
+            invalidate() {},
+            render: () =>
+              widgetLines(theme, [
+                {
+                  name: "review-diff",
+                  phase: "Verify",
+                  status: "running",
+                  running: 1,
+                  done: 3,
+                  failed: 1,
+                },
+              ]),
+          }),
+          { placement: "belowEditor" },
+        );
+        try {
+          await showWorkflowsDashboard(
+            ctx,
+            demoWorkflowsHost(createDemoRuns(Date.now())),
+          );
+        } finally {
+          ctx.ui.notify("demo widget below the input clears in 20s", "info");
+          demoWidgetTimer = setTimeout(
+            () => currentCtx?.ui.setWidget("workflows-demo", undefined),
+            20_000,
+          );
+        }
+        return;
+      }
       // Only this session's runs (active + completed, held in memory for the
       // process). Past runs from other sessions live on disk but would be
       // noise here; resumed-session rehydration from disk is a future TODO.
-      const combined = () =>
-        [...activeRuns.values()]
-          .map((run) => run.record)
-          .sort((a, b) => b.startedAt - a.startedAt);
-      for (;;) {
-        if (combined().length === 0) {
-          ctx.ui.notify("No workflow runs", "info");
-          return;
-        }
-        const picked = await livePicker(ctx, "Workflow runs:", () =>
-          combined().map(describeRun),
-        );
-        if (picked === undefined) return;
-        const record = combined()[picked];
-        if (!record) return;
-
-        await liveDetailView(ctx, () => {
-          const active = activeRuns.get(record.runId);
-          const current = active?.record ?? record;
-          return buildRunDetailLines(current, {
-            currentPhase: active?.currentPhase,
-            agents: active ? [...active.agents.values()] : undefined,
-            logs: active?.logs,
-            dir:
-              active?.dir ??
-              `~/.pi/agent/workflows/${record.runId}`,
-          });
-        });
-      }
+      const toView = (run: ActiveRun): RunView => ({
+        record: run.record,
+        phases: run.phases,
+        currentPhase: run.currentPhase,
+        agents: [...run.agents.values()],
+        logs: run.logs,
+        dir: run.dir,
+      });
+      await showWorkflowsDashboard(ctx, {
+        getRuns: () =>
+          [...activeRuns.values()]
+            .sort((a, b) => b.record.startedAt - a.record.startedAt)
+            .map(toView),
+        stop: (runId) => activeRuns.get(runId)?.abort.abort(),
+      });
     },
   });
 }

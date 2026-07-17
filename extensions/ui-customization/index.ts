@@ -15,7 +15,11 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import {
+  truncateToWidth,
+  visibleWidth,
+  type Component,
+} from "@earendil-works/pi-tui";
 import { runCommand } from "../shared/process.ts";
 import { roundedBox } from "./src/box.ts";
 import { gradientLogo } from "./src/gradient.ts";
@@ -64,9 +68,73 @@ function sessionCost(ctx: ExtensionContext): number {
 export default function uiCustomization(pi: ExtensionAPI) {
   let requestRender: (() => void) | undefined;
   let version = ""; // resolved async from `pi --version`
+  let stickyBottom = true;
+
+  // ---- Sticky input: pad the buffer so the editor hugs the terminal
+  // bottom. pi-tui renders one linear buffer and shows its tail; on a
+  // short session the editor would otherwise sit right under the content.
+  // The filler measures every other component and pads the difference.
+  // Cost: one extra logical render pass per frame (Text caches by width;
+  // Markdown re-renders) — /sticky toggles it off if it ever drags.
+  const installSticky = (ctx: ExtensionContext) => {
+    if (ctx.mode !== "tui") return;
+    if (!stickyBottom) {
+      ctx.ui.setWidget("sticky-bottom", undefined);
+      return;
+    }
+    ctx.ui.setWidget(
+      "sticky-bottom",
+      (tui) => {
+        // Walking tui.children re-enters this component (it lives in one of
+        // those containers). The guard makes the nested call count as zero
+        // height — identity checks are useless here because pi and the
+        // extension resolve to different pi-tui copies (instanceof lies).
+        let measuring = false;
+        // The buffer must never shrink: pi's inline renderer can't unscroll,
+        // so a shrinking buffer after a transient overflow (streaming tool
+        // output that later collapses, autocomplete, status lines) forces
+        // full redraws and duplicates content into scrollback. Pad to a
+        // high-water mark instead — the filler absorbs collapses and is
+        // consumed by new content before anything scrolls again.
+        let highWater = 0;
+        let lastWidth = 0;
+        const filler: Component = {
+          invalidate() {},
+          render(width: number) {
+            if (measuring) return [];
+            measuring = true;
+            try {
+              if (width !== lastWidth) {
+                // Rewrap changes every height; start the mark over.
+                lastWidth = width;
+                highWater = 0;
+              }
+              let total = 0;
+              for (const child of tui.children) {
+                total += child.render(width).length;
+              }
+              highWater = Math.max(highWater, tui.terminal.rows, total);
+              return Array.from(
+                { length: Math.max(0, highWater - total) },
+                () => "",
+              );
+            } catch {
+              // Measurement is best-effort; never break the frame.
+              return [];
+            } finally {
+              measuring = false;
+            }
+          },
+        };
+        return filler;
+      },
+      { placement: "aboveEditor" },
+    );
+  };
 
   const install = (ctx: ExtensionContext) => {
     if (ctx.mode !== "tui") return;
+    installSticky(ctx);
 
     // ---- Header: bordered box with logo + version + folder + model ----
     ctx.ui.setHeader((tui, theme) => {
@@ -120,7 +188,7 @@ export default function uiCustomization(pi: ExtensionAPI) {
       };
     });
 
-    // ---- Footer: single line — cost · context  ⟷  provider/model ● thinking.
+    // ---- Footer: single line — provider/model ● thinking  ⟷  cost · context.
     // Git lives in a widget above the input (git-info); other extension
     // statuses (e.g. MCP) are intentionally not shown here.
     ctx.ui.setFooter((tui, theme) => {
@@ -136,6 +204,10 @@ export default function uiCustomization(pi: ExtensionAPI) {
           const thinking = model?.reasoning ? pi.getThinkingLevel() : "off";
 
           const left =
+            theme.fg("dim", formatModel(model?.provider, model?.id)) +
+            " " +
+            theme.fg("muted", thinking);
+          const right =
             theme.fg("muted", formatCost(cost)) +
             theme.fg("dim", " (sub) · ") +
             theme.fg(
@@ -145,10 +217,6 @@ export default function uiCustomization(pi: ExtensionAPI) {
                 usage?.contextWindow ?? model?.contextWindow ?? 0,
               ),
             );
-          const right =
-            theme.fg("dim", formatModel(model?.provider, model?.id)) +
-            theme.fg("accent", " ● ") +
-            theme.fg("muted", thinking);
 
           return [pad + columns(left, right, inner)];
         },
@@ -157,6 +225,15 @@ export default function uiCustomization(pi: ExtensionAPI) {
 
     ctx.ui.setTitle("pi");
   };
+
+  pi.registerCommand("sticky", {
+    description: "Toggle the input sticking to the terminal bottom",
+    handler: async (_args, ctx) => {
+      stickyBottom = !stickyBottom;
+      installSticky(ctx);
+      ctx.ui.notify(`sticky input ${stickyBottom ? "on" : "off"}`, "info");
+    },
+  });
 
   const nudge = () => requestRender?.();
 
@@ -184,6 +261,7 @@ export default function uiCustomization(pi: ExtensionAPI) {
     if (ctx.mode === "tui") {
       ctx.ui.setHeader(undefined);
       ctx.ui.setFooter(undefined);
+      ctx.ui.setWidget("sticky-bottom", undefined);
     }
   });
 }

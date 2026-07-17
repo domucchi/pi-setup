@@ -15,19 +15,18 @@ import type {
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { liveDetailView } from "../shared/live-detail.ts";
+import type { OverlayTheme } from "../shared/overlay.ts";
+import { showSubagentsDashboard } from "./dashboard.ts";
+import { createDemoSubagents, demoSubagentsHost } from "./src/demo.ts";
 import {
   buildAgentTypeError,
   buildCheckResult,
   buildCompletionMessage,
   buildListResult,
-  buildPickerLabel,
   buildSpawnResult,
   buildWaitResult,
   CANCEL_DESCRIPTION,
   CHECK_DESCRIPTION,
-  describeDuration,
-  describeRuntime,
   describeStatus,
   LIST_DESCRIPTION,
   PARAMETER_DESCRIPTIONS,
@@ -37,7 +36,6 @@ import {
   SPAWN_PROMPT_SNIPPET,
   WAIT_DESCRIPTION,
 } from "./prompt.ts";
-import { livePicker } from "../shared/live-picker.ts";
 import { loadAgentDefinitions } from "./src/agents.ts";
 import {
   createChild,
@@ -60,19 +58,93 @@ interface CompletionDetails {
 
 export default function subagents(pi: ExtensionAPI) {
   let currentCtx: ExtensionContext | undefined;
-  let lastWidgetCount = 0;
   const pendingResults = new Map<string, SubagentSnapshot>();
   /** Ids whose current settle is already reported through a tool result. */
   const consumed = new Set<string>();
 
-  const updateWidget = (count: number) => {
-    if (!currentCtx || count === lastWidgetCount) return;
-    lastWidgetCount = count;
+  // ---- Indicator UNDER the input: per-state counts with icons/colors.
+  // Settled agents linger in the counts for a minute, then drop out (they
+  // stay in /subagents); the widget hides once every bucket is empty.
+  const WIDGET_LINGER_MS = 60_000;
+  const WIDGET_TICK_MS = 5_000;
+  let widgetVisible = false;
+  let widgetTimer: ReturnType<typeof setInterval> | undefined;
+  let nudgeWidget: (() => void) | undefined;
+
+  interface WidgetCounts {
+    running: number;
+    done: number;
+    failed: number;
+  }
+
+  // One line builder for the real widget and the /subagents demo one.
+  const widgetLine = (theme: OverlayTheme, counts: WidgetCounts) => {
+    const parts: string[] = [];
+    if (counts.running > 0) {
+      parts.push(theme.fg("warning", `◆ ${counts.running} running`));
+    }
+    if (counts.done > 0) {
+      parts.push(theme.fg("success", `✓ ${counts.done} done`));
+    }
+    if (counts.failed > 0) {
+      parts.push(theme.fg("error", `✗ ${counts.failed} failed`));
+    }
+    parts.push(theme.fg("dim", "/subagents to manage"));
+    return [` ${parts.join(theme.fg("dim", " · "))}`];
+  };
+
+  const widgetCounts = (): WidgetCounts => {
+    const now = Date.now();
+    const counts: WidgetCounts = { running: 0, done: 0, failed: 0 };
+    for (const snapshot of manager.list()) {
+      if (snapshot.status === "working") counts.running += 1;
+      else if (
+        snapshot.status !== "cancelled" &&
+        snapshot.settledAt !== null &&
+        now - snapshot.settledAt <= WIDGET_LINGER_MS
+      ) {
+        if (snapshot.status === "failed") counts.failed += 1;
+        else counts.done += 1;
+      }
+    }
+    return counts;
+  };
+
+  // The widget is set ONCE per visible spell (render() pulls fresh counts);
+  // re-setting on every change would reorder it against other widgets. The
+  // ticker re-renders so lingering entries expire without user activity.
+  const updateWidget = () => {
+    if (!currentCtx) return;
+    const counts = widgetCounts();
+    const visible = counts.running + counts.done + counts.failed > 0;
+    if (!visible) {
+      if (widgetVisible) currentCtx.ui.setWidget("subagents", undefined);
+      widgetVisible = false;
+      nudgeWidget = undefined;
+      if (widgetTimer) {
+        clearInterval(widgetTimer);
+        widgetTimer = undefined;
+      }
+      return;
+    }
+    if (!widgetTimer) {
+      widgetTimer = setInterval(() => {
+        updateWidget();
+        nudgeWidget?.();
+      }, WIDGET_TICK_MS);
+    }
+    if (widgetVisible) return;
+    widgetVisible = true;
     currentCtx.ui.setWidget(
       "subagents",
-      count > 0
-        ? [` ◆ ${count} subagent${count === 1 ? "" : "s"} working · /subagents to inspect`]
-        : undefined,
+      (tui, theme) => {
+        nudgeWidget = () => tui.requestRender();
+        return {
+          invalidate() {},
+          render: () => widgetLine(theme, widgetCounts()),
+        };
+      },
+      { placement: "belowEditor" },
     );
   };
 
@@ -161,6 +233,12 @@ export default function subagents(pi: ExtensionAPI) {
   pi.on("session_shutdown", async () => {
     currentCtx = undefined;
     pendingResults.clear();
+    if (widgetTimer) {
+      clearInterval(widgetTimer);
+      widgetTimer = undefined;
+    }
+    widgetVisible = false;
+    nudgeWidget = undefined;
     await manager.disposeAll();
   });
 
@@ -342,33 +420,49 @@ export default function subagents(pi: ExtensionAPI) {
     },
   });
 
-  pi.registerCommand("subagents", {
-    description: "Inspect subagents",
-    handler: async (_args, ctx) => {
-      for (;;) {
-        if (manager.list().length === 0) {
-          ctx.ui.notify("No subagents", "info");
-          return;
-        }
-        const picked = await livePicker(ctx, "Subagents:", () =>
-          manager.list().map(buildPickerLabel),
-        );
-        if (picked === undefined) return;
-        const snapshot = manager.list()[picked];
-        if (!snapshot) return;
+  let demoWidgetTimer: ReturnType<typeof setTimeout> | undefined;
 
-        await liveDetailView(ctx, () => {
-          const current = manager.get(snapshot.id) ?? snapshot;
-          const runtime = describeRuntime(current);
-          return [
-            `${current.id} (${current.agentType}) "${current.title}" — ${describeStatus(current)} after ${describeDuration(current.startedAt, current.settledAt)}, run ${current.runs}`,
-            ...(runtime ? [runtime] : []),
-            ...(current.sessionFile ? [`session: ${current.sessionFile}`] : []),
-            "",
-            ...manager.transcriptTail(current.id, 20),
-          ];
-        });
+  pi.registerCommand("subagents", {
+    description: "Inspect subagents (`/subagents demo` previews the UI)",
+    handler: async (args, ctx) => {
+      if (args?.trim() === "demo") {
+        // Fixture-backed preview: same dashboard + widget code paths,
+        // no real children. The widget lingers so it can be seen under
+        // the input after the overlay closes.
+        if (demoWidgetTimer) clearTimeout(demoWidgetTimer);
+        ctx.ui.setWidget(
+          "subagents-demo",
+          (_tui, theme) => ({
+            invalidate() {},
+            render: () => widgetLine(theme, { running: 1, done: 2, failed: 1 }),
+          }),
+          { placement: "belowEditor" },
+        );
+        try {
+          await showSubagentsDashboard(
+            ctx,
+            demoSubagentsHost(createDemoSubagents(Date.now())),
+          );
+        } finally {
+          ctx.ui.notify("demo widget below the input clears in 20s", "info");
+          demoWidgetTimer = setTimeout(
+            () => currentCtx?.ui.setWidget("subagents-demo", undefined),
+            20_000,
+          );
+        }
+        return;
       }
+      await showSubagentsDashboard(ctx, {
+        list: () => manager.list(),
+        transcriptTail: (id, lines) => manager.transcriptTail(id, lines),
+        cancel: (id) => {
+          // Mirror the subagent_cancel tool: suppress the pending
+          // completion follow-up for an agent the user kills by hand.
+          consumed.add(id);
+          pendingResults.delete(id);
+          void manager.cancel([id]).catch(() => {});
+        },
+      });
     },
   });
 }

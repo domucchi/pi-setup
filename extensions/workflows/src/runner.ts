@@ -15,6 +15,7 @@ import { loadAgentDefinitions } from "../../subagents/src/agents.ts";
 import {
   createChild,
   resolveModel,
+  type ChildHandle,
   type RunOutcome,
 } from "../../subagents/src/child.ts";
 import type { SandboxAgentOutcome, SandboxAgentRequest } from "./sandbox.ts";
@@ -25,7 +26,17 @@ export interface RunnerEvent {
   seq: number;
   label: string;
   phase?: string;
-  state: "started" | "settled";
+  state: "started" | "activity" | "settled";
+  /** Started only. */
+  prompt?: string;
+  agentType?: string;
+  /** Activity only — one tool-call preview, e.g. "→ read_file". */
+  preview?: string;
+  /** Activity + settled — live child telemetry. */
+  model?: string;
+  tokens?: number;
+  contextWindow?: number;
+  toolCalls?: number;
   ok?: boolean;
   error?: string;
   durationMs?: number;
@@ -100,7 +111,23 @@ export function createAgentRunner(options: {
       label,
       phase: request.opts.phase,
       state: "started",
+      prompt: request.prompt,
+      agentType: request.opts.agentType ?? "worker",
     });
+
+    // Live child telemetry for the dashboard; handle is assigned before
+    // prompt() runs, so every activity event sees it.
+    let handle: ChildHandle | undefined;
+    let toolCalls = 0;
+    const telemetry = () => {
+      const usage = handle?.usage();
+      return {
+        model: handle?.modelLabel,
+        tokens: usage?.tokens,
+        contextWindow: usage?.contextWindow,
+        toolCalls,
+      };
+    };
 
     // Exactly one settled event per started request, whatever path we take
     // (abort, unknown role, error, or a real run) — so every agent lands in
@@ -119,6 +146,7 @@ export function createAgentRunner(options: {
         durationMs: Date.now() - startedAt,
         output: outcome.output,
         structured: outcome.structured,
+        ...telemetry(),
       });
       return outcome;
     };
@@ -169,11 +197,32 @@ export function createAgentRunner(options: {
           inMemorySession: true,
           sessionName: `workflow: ${label}`,
           onEvent: (event) => {
-            if (event.type === "run-settled") resolve(event.outcome);
+            if (event.type === "activity") {
+              if (event.preview.startsWith("→")) toolCalls += 1;
+              options.onEvent?.({
+                seq: request.id,
+                label,
+                phase: request.opts.phase,
+                state: "activity",
+                preview: event.preview,
+                ...telemetry(),
+              });
+            } else if (event.type === "run-settled") {
+              resolve(event.outcome);
+            }
           },
         }).then(
           (child) => {
+            handle = child;
             disposers.push(() => child.dispose());
+            // Announce the resolved model before any tool activity.
+            options.onEvent?.({
+              seq: request.id,
+              label,
+              phase: request.opts.phase,
+              state: "activity",
+              ...telemetry(),
+            });
             child.prompt(request.prompt);
           },
           (error) =>

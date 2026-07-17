@@ -2,6 +2,7 @@ import type { ChildEvent, ChildHandle, RunOutcome } from "./child.ts";
 
 export const MAX_WORKING = 4;
 export const MAX_TRACKED = 32;
+export const MAX_ACTIVITY = 8;
 
 export type SubagentStatus = "working" | "idle" | "failed" | "cancelled";
 
@@ -15,6 +16,12 @@ export interface SubagentSnapshot {
   finalText: string;
   errorText: string | null;
   lastActivity: string | null;
+  /** Recent tool-call previews, newest last (bounded). */
+  recentActivity: string[];
+  /** Cumulative across runs. */
+  toolCalls: number;
+  /** The prompt that started the current/most recent run. */
+  prompt: string;
   startedAt: number;
   settledAt: number | null;
   runs: number;
@@ -65,13 +72,20 @@ export class SubagentManager {
     return count;
   }
 
+  /** Detached copy — recentActivity keeps mutating on the live snapshot. */
+  private static snap(snapshot: SubagentSnapshot): SubagentSnapshot {
+    return { ...snapshot, recentActivity: [...snapshot.recentActivity] };
+  }
+
   list(): SubagentSnapshot[] {
-    return [...this.entries.values()].map((entry) => ({ ...entry.snapshot }));
+    return [...this.entries.values()].map((entry) =>
+      SubagentManager.snap(entry.snapshot),
+    );
   }
 
   get(id: string): SubagentSnapshot | undefined {
     const entry = this.entries.get(id);
-    return entry ? { ...entry.snapshot } : undefined;
+    return entry ? SubagentManager.snap(entry.snapshot) : undefined;
   }
 
   transcriptTail(id: string, lines: number): string[] {
@@ -102,6 +116,9 @@ export class SubagentManager {
         finalText: "",
         errorText: null,
         lastActivity: null,
+        recentActivity: [],
+        toolCalls: 0,
+        prompt: options.prompt,
         startedAt: Date.now(),
         settledAt: null,
         runs: 1,
@@ -124,7 +141,7 @@ export class SubagentManager {
       this.entries.set(id, entry);
       this.hooks.onWorkingCountChanged?.(this.workingCount() - 1);
       child.prompt(options.prompt);
-      return { ...snapshot };
+      return SubagentManager.snap(snapshot);
     } finally {
       this.reserved -= 1;
     }
@@ -141,7 +158,7 @@ export class SubagentManager {
     }
     if (entry.snapshot.status === "working" && entry.child.isStreaming()) {
       await entry.child.steer(message);
-      return { ...entry.snapshot };
+      return SubagentManager.snap(entry.snapshot);
     }
     if (this.workingCount() >= MAX_WORKING) {
       throw new Error(
@@ -152,9 +169,10 @@ export class SubagentManager {
     entry.snapshot.errorText = null;
     entry.snapshot.settledAt = null;
     entry.snapshot.runs += 1;
+    entry.snapshot.prompt = message;
     this.hooks.onWorkingCountChanged?.(this.workingCount());
     entry.child.prompt(message);
-    return { ...entry.snapshot };
+    return SubagentManager.snap(entry.snapshot);
   }
 
   /** Resolves once every listed subagent is not working. */
@@ -190,7 +208,7 @@ export class SubagentManager {
       entry.snapshot.status = "cancelled";
       entry.snapshot.settledAt ??= Date.now();
       this.releaseWaiters(entry);
-      results.push({ ...entry.snapshot });
+      results.push(SubagentManager.snap(entry.snapshot));
     }
     this.hooks.onWorkingCountChanged?.(this.workingCount());
     return results;
@@ -215,9 +233,21 @@ export class SubagentManager {
     switch (event.type) {
       case "run-started":
         break;
-      case "activity":
+      case "activity": {
         entry.snapshot.lastActivity = event.preview;
+        entry.snapshot.recentActivity.push(event.preview);
+        if (entry.snapshot.recentActivity.length > MAX_ACTIVITY) {
+          entry.snapshot.recentActivity.shift();
+        }
+        if (event.preview.startsWith("→")) entry.snapshot.toolCalls += 1;
+        // Keep the token gauge live while the child works.
+        const usage = entry.child?.usage();
+        if (usage?.tokens !== undefined) entry.snapshot.tokens = usage.tokens;
+        if (usage?.contextWindow !== undefined) {
+          entry.snapshot.contextWindow = usage.contextWindow;
+        }
         break;
+      }
       case "run-settled":
         this.settleRun(entry, event.outcome);
         break;
@@ -248,7 +278,7 @@ export class SubagentManager {
     const consumed = entry.settleWaiters.length > 0;
     this.releaseWaiters(entry);
     this.hooks.onWorkingCountChanged?.(this.workingCount());
-    this.hooks.onRunSettled?.({ ...entry.snapshot }, consumed);
+    this.hooks.onRunSettled?.(SubagentManager.snap(entry.snapshot), consumed);
   }
 
   private releaseWaiters(entry: Entry) {

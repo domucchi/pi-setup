@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPickerLabel, describeDuration, shortModel } from "./prompt.ts";
+import { buildCheckResult, describeDuration, describeStatus } from "./prompt.ts";
 import type { SubagentSnapshot } from "./src/manager.ts";
 
 function snapshot(overrides: Partial<SubagentSnapshot> = {}): SubagentSnapshot {
@@ -12,6 +12,9 @@ function snapshot(overrides: Partial<SubagentSnapshot> = {}): SubagentSnapshot {
     finalText: "",
     errorText: null,
     lastActivity: "✓ read",
+    recentActivity: ["→ read", "✓ read"],
+    toolCalls: 1,
+    prompt: "Map the workspace layout and report back.",
     startedAt: Date.now() - 44_000,
     settledAt: null,
     runs: 1,
@@ -24,24 +27,13 @@ function snapshot(overrides: Partial<SubagentSnapshot> = {}): SubagentSnapshot {
   };
 }
 
-describe("shortModel", () => {
-  it("strips the provider prefix", () => {
-    expect(shortModel("openai-codex/gpt-5.6-sol")).toBe("gpt-5.6-sol");
-    expect(shortModel("bare-id")).toBe("bare-id");
-    expect(shortModel(undefined)).toBeUndefined();
-  });
-});
-
-describe("buildPickerLabel", () => {
-  it("shows id, live status, role, model, and title", () => {
-    const label = buildPickerLabel(snapshot());
-    expect(label).toContain("sub-1 ◆ working (✓ read)");
-    expect(label).toContain("explore · gpt-5.6-sol · map workspace");
-  });
-
-  it("omits the model when unknown", () => {
-    const label = buildPickerLabel(snapshot({ model: undefined }));
-    expect(label).toContain("explore · map workspace");
+describe("describeStatus", () => {
+  it("shows live activity while working", () => {
+    expect(describeStatus(snapshot())).toBe("working (✓ read)");
+    expect(describeStatus(snapshot({ status: "idle" }))).toBe("finished");
+    expect(
+      describeStatus(snapshot({ status: "failed", errorText: "boom" })),
+    ).toBe("failed (boom)");
   });
 });
 
@@ -50,5 +42,15 @@ describe("describeDuration", () => {
     const t = 1_000_000;
     expect(describeDuration(t, t + 44_000)).toBe("44s");
     expect(describeDuration(t, t + 83_000)).toBe("1min 23s");
+  });
+});
+
+describe("buildCheckResult", () => {
+  it("includes runtime and context usage", () => {
+    const text = buildCheckResult(
+      snapshot({ tokens: 12_000, contextWindow: 200_000 }),
+    );
+    expect(text).toContain("openai-codex/gpt-5.6-sol · thinking medium");
+    expect(text).toContain("context: 6% of 200k");
   });
 });

@@ -109,29 +109,6 @@ export function buildWaitResult(snapshots: SubagentSnapshot[]) {
     .join("\n\n");
 }
 
-/** Bare model id without the provider prefix, for compact rows. */
-export function shortModel(model: string | undefined) {
-  if (!model) return undefined;
-  const slash = model.indexOf("/");
-  return slash > 0 ? model.slice(slash + 1) : model;
-}
-
-/** One live picker row: id, state, runtime, role, model, title. */
-export function buildPickerLabel(snapshot: SubagentSnapshot) {
-  const icon =
-    snapshot.status === "working"
-      ? "◆"
-      : snapshot.status === "failed"
-        ? "✗"
-        : "✓";
-  const parts = [
-    snapshot.agentType,
-    shortModel(snapshot.model),
-    snapshot.title,
-  ].filter(Boolean);
-  return `${snapshot.id} ${icon} ${describeStatus(snapshot)} ${describeDuration(snapshot.startedAt, snapshot.settledAt)} · ${parts.join(" · ")}`;
-}
-
 export function describeRuntime(snapshot: SubagentSnapshot) {
   const parts: string[] = [];
   if (snapshot.model) parts.push(snapshot.model);
