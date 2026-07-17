@@ -74,6 +74,19 @@ export function parseTokenUsage(params: JsonRecord) {
   };
 }
 
+/**
+ * app-server has no system-prompt channel, so a role's system prompt is
+ * delivered as a framed preamble on the FIRST turn (pure, testable).
+ */
+export function composeFirstTurn(
+  systemPrompt: string | undefined,
+  text: string,
+): string {
+  const trimmed = systemPrompt?.trim();
+  if (!trimmed) return text;
+  return `<role-instructions>\n${trimmed}\n</role-instructions>\n\n${text}`;
+}
+
 /** Clamp a pi thinking level to codex's effort scale (or omit). */
 export function codexEffort(thinking: string | undefined): string | undefined {
   if (!thinking) return undefined;
@@ -359,6 +372,8 @@ export async function createCodexChild(
   }
 
   const effort = codexEffort(options.thinking);
+  // Consumed by the first run; later turns are plain user messages.
+  let roleInstructions = options.appendSystemPrompt;
 
   const startRun = (text: string) => {
     if (state.closed || !state.settled) return;
@@ -369,9 +384,11 @@ export async function createCodexChild(
     state.interruptRequested = false;
     emit({ type: "run-started" });
     pushTranscript(`> ${text.split("\n")[0]}`);
+    const composed = composeFirstTurn(roleInstructions, text);
+    roleInstructions = undefined;
     void request("turn/start", {
       threadId: state.threadId,
-      input: [{ type: "text", text, text_elements: [] }],
+      input: [{ type: "text", text: composed, text_elements: [] }],
       ...(effort ? { effort } : {}),
     }).then(
       (result) => {

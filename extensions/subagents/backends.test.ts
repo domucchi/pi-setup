@@ -3,6 +3,7 @@ import { parseAgentFile } from "./src/agents.ts";
 import { claudeEffort, interpretClaudeMessage } from "./src/backends/claude.ts";
 import {
   codexEffort,
+  composeFirstTurn,
   parseTokenUsage,
   toolPreview,
 } from "./src/backends/codex.ts";
@@ -124,6 +125,14 @@ describe("codex helpers", () => {
       tokens: undefined,
       contextWindow: undefined,
     });
+  });
+
+  it("frames role instructions into the first turn only", () => {
+    expect(composeFirstTurn("Be careful.", "Do the task.")).toBe(
+      "<role-instructions>\nBe careful.\n</role-instructions>\n\nDo the task.",
+    );
+    expect(composeFirstTurn(undefined, "Do it.")).toBe("Do it.");
+    expect(composeFirstTurn("   ", "Do it.")).toBe("Do it.");
   });
 
   it("clamps thinking levels to codex efforts", () => {

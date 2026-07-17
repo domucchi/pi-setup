@@ -62,6 +62,7 @@ but require explicit user approval first — house rule):
 Default: omit `model` — pi children inherit the parent session's model
 and thinking level; claude/codex children use their CLI defaults.
 
+<!-- 
 | Work shape                  | Agent type · model     | Thinking |
 | --------------------------- | ---------------------- | -------- |
 | broad read-only scouting    | explore                | low      |
@@ -69,6 +70,7 @@ and thinking level; claude/codex children use their CLI defaults.
 | bulk mechanical sweeps      | codex · gpt-5.6-luna   | low      |
 | independent hard analysis   | codex · gpt-5.6-sol    | high     |
 | taste-sensitive review      | claude · sonnet/opus   | medium   |
+-->
 
 ## Delegation rules
 
