@@ -22,6 +22,7 @@ import {
 import {
   allDone,
   displayWindow,
+  extraInProgress,
   MAX_TODOS,
   strike,
   type Todo,
@@ -142,6 +143,14 @@ export default function todos(pi: ExtensionAPI) {
       ),
     }),
     async execute(_id, params) {
+      const extra = extraInProgress(params.todos);
+      if (extra.length > 0) {
+        throw new Error(
+          `Only one todo may be in_progress at a time (got ${extra.length}: ${extra
+            .map((t) => `"${t}"`)
+            .join(", ")}). Mark the others pending or completed and retry.`,
+        );
+      }
       list = params.todos.map((t) => ({ text: t.text, status: t.status }));
       completedAt = allDone(list) ? Date.now() : undefined;
       updateWidget();

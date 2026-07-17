@@ -3,6 +3,7 @@ import { buildTodoResult } from "./prompt.ts";
 import {
   allDone,
   displayWindow,
+  extraInProgress,
   strike,
   summarize,
   todoCounts,
@@ -49,6 +50,16 @@ describe("displayWindow", () => {
     const windowed = displayWindow(todos, 10);
     expect(windowed.shown).toHaveLength(10);
     expect(windowed.hidden).toBe(2);
+  });
+});
+
+describe("extraInProgress", () => {
+  it("flags only lists with more than one in_progress item", () => {
+    expect(extraInProgress([todo("in_progress"), todo("pending")])).toEqual([]);
+    expect(
+      extraInProgress([todo("in_progress", "a"), todo("in_progress", "b")]),
+    ).toEqual(["a", "b"]);
+    expect(extraInProgress([])).toEqual([]);
   });
 });
 

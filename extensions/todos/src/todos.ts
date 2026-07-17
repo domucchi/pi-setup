@@ -45,6 +45,16 @@ export function summarize(todos: Todo[]): string {
   return parts.length > 0 ? parts.join(" · ") : "empty";
 }
 
+/**
+ * Texts of items violating the one-in_progress invariant (empty when
+ * valid). Enforced in the tool, not just the prompt — a rejected call
+ * corrects the model immediately.
+ */
+export function extraInProgress(todos: Todo[]): string[] {
+  const active = todos.filter((t) => t.status === "in_progress");
+  return active.length > 1 ? active.map((t) => t.text) : [];
+}
+
 /** ANSI strikethrough (SGR 9) — supported by all modern terminals. */
 export function strike(text: string): string {
   return `\x1b[9m${text}\x1b[29m`;
