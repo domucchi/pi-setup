@@ -71,15 +71,18 @@ export interface TodoWindow {
 /**
  * Trim the display list to ~`max` rows while keeping the WORK FRONT
  * visible: leading completed items collapse into a single summary line
- * (they'd otherwise push the in_progress item off the cap), then the
- * list from the first open item forward, then an overflow count.
+ * (they'd otherwise push the in_progress item off the cap) — except the
+ * most recent one, which stays visible struck-through for continuity —
+ * then the list from the first open item forward, then an overflow count.
  */
 export function displayWindow(todos: Todo[], max: number): TodoWindow {
   if (todos.length <= max) return { doneCollapsed: 0, shown: todos, hidden: 0 };
   const firstOpen = todos.findIndex((t) => t.status !== "completed");
-  // All done: show the tail; the collapsed-head summary line costs a row.
+  // Keep one completed item visible above the front; all-done shows the tail.
   const start =
-    firstOpen === -1 ? Math.max(1, todos.length - (max - 1)) : firstOpen;
+    firstOpen === -1
+      ? Math.max(1, todos.length - (max - 1))
+      : Math.max(0, firstOpen - 1);
   const budget = Math.max(1, max - (start > 0 ? 1 : 0));
   const shown = todos.slice(start, start + budget);
   return {

@@ -50,7 +50,7 @@ describe("displayWindow", () => {
     });
   });
 
-  it("collapses leading done items so the work front stays visible", () => {
+  it("collapses done items but keeps the most recent one visible", () => {
     const todos = [
       todo("completed", "d1"),
       todo("completed", "d2"),
@@ -59,10 +59,11 @@ describe("displayWindow", () => {
       ...Array.from({ length: 6 }, (_, i) => todo("pending", `p${i}`)),
     ];
     const windowed = displayWindow(todos, 6);
-    expect(windowed.doneCollapsed).toBe(3);
-    expect(windowed.shown[0].text).toBe("current");
+    expect(windowed.doneCollapsed).toBe(2); // d1+d2 merged, d3 stays visible
+    expect(windowed.shown[0].text).toBe("d3");
+    expect(windowed.shown[1].text).toBe("current");
     expect(windowed.shown).toHaveLength(5); // 6 rows − 1 done-summary line
-    expect(windowed.hidden).toBe(2);
+    expect(windowed.hidden).toBe(3);
   });
 
   it("shows the tail when everything is completed", () => {
