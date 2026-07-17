@@ -43,7 +43,9 @@ edit freely; it is read at load time, no code changes needed.
 ## Model roster (verified against the installed CLIs)
 
 **claude backend** — pass an alias: `sonnet`, `opus`, or `fable`.
-Omit for the Claude Code default. Never use `haiku`.
+Omit for the Claude Code default. Never use `haiku`. `thinking` maps
+to Claude Code effort (low/medium/high; off/minimal clamp to low;
+xhigh/max exist but require explicit user approval first — house rule).
 
 **codex backend** — pass a model id; `thinking` maps to codex
 reasoning effort (minimal/low/medium/high accepted; xhigh/max exist
@@ -51,20 +53,9 @@ but require explicit user approval first — house rule):
 
 | model id            | default effort | notes                          |
 | ------------------- | -------------- | ------------------------------ |
-| gpt-5.6-sol         | low            | frontier; hard problems        |
-| gpt-5.6-terra       | medium         | workhorse                      |
-| gpt-5.6-luna        | medium         | cheapest bulk capacity         |
-| gpt-5.4-mini        | medium         | tiny/fast utility              |
-| gpt-5.3-codex-spark | high           | code-specialized               |
-
-(gpt-5.5 and gpt-5.4 also exist — superseded generations, no reason to
-pick them.)
-
-Routing by the user's ratings (capacity / intelligence / taste):
-luna 10/5/4 · terra 9/7/5 · sol 6/9/6 · sonnet 5/7/7 · opus 4/8/8 ·
-fable 2/10/10. Bulk → luna/terra. Hard reasoning → sol or opus.
-User-facing taste → sonnet/opus/fable. Fable is scarce — reserve it
-for judgment-critical work.
+| gpt-5.6-sol         | high           | frontier; hard problems        |
+| gpt-5.6-terra       | high           | workhorse                      |
+| gpt-5.6-luna        | high           | cheapest bulk capacity         |
 
 ## Model and thinking selection
 

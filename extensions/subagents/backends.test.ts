@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseAgentFile } from "./src/agents.ts";
-import { interpretClaudeMessage } from "./src/backends/claude.ts";
+import { claudeEffort, interpretClaudeMessage } from "./src/backends/claude.ts";
 import {
   codexEffort,
   parseTokenUsage,
@@ -79,6 +79,17 @@ describe("interpretClaudeMessage", () => {
     expect((meaning.settled as { errorText: string }).errorText).toContain(
       "error_during_execution",
     );
+  });
+});
+
+describe("claudeEffort", () => {
+  it("passes native levels and clamps pi-only ones", () => {
+    expect(claudeEffort("high")).toBe("high");
+    expect(claudeEffort("max")).toBe("max");
+    expect(claudeEffort("off")).toBe("low");
+    expect(claudeEffort("minimal")).toBe("low");
+    expect(claudeEffort(undefined)).toBeUndefined();
+    expect(claudeEffort("weird")).toBeUndefined();
   });
 });
 

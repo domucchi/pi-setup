@@ -13,6 +13,19 @@ import type { ChildEvent, ChildHandle, RunOutcome } from "../child.ts";
 
 const FIRST_MESSAGE_WATCHDOG_MS = 90_000;
 const TRANSCRIPT_MAX_LINES = 200;
+const CLAUDE_EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
+
+/** Clamp a pi thinking level to Claude Code's effort scale (or omit). */
+export function claudeEffort(
+  thinking: string | undefined,
+): "low" | "medium" | "high" | "xhigh" | "max" | undefined {
+  if (!thinking) return undefined;
+  if (CLAUDE_EFFORTS.has(thinking)) {
+    return thinking as "low" | "medium" | "high" | "xhigh" | "max";
+  }
+  if (thinking === "off" || thinking === "minimal") return "low";
+  return undefined;
+}
 
 export interface ExternalChildOptions {
   cwd: string;
@@ -156,11 +169,13 @@ export async function createClaudeChild(
     emit({ type: "run-settled", outcome });
   };
 
+  const effort = claudeEffort(options.thinking);
   const stream = query({
     prompt: bridge.iterable as AsyncIterable<never>,
     options: {
       cwd: options.cwd,
       ...(options.model ? { model: options.model } : {}),
+      ...(effort ? { effort } : {}),
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
       ...(options.appendSystemPrompt
@@ -225,7 +240,7 @@ export async function createClaudeChild(
     get modelLabel() {
       return state.modelLabel;
     },
-    thinkingLevel: undefined,
+    thinkingLevel: effort,
     prompt: startRun,
     async steer(text) {
       // The CLI queues mid-run user messages natively.
