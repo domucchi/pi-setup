@@ -15,14 +15,18 @@ page.
 ## Running scripts
 
 playwright (with cached chromium) is installed in the harness, not the
-target project. Resolve it via NODE_PATH:
+target project — and NODE_PATH does NOT apply to ESM `import`, so
+resolve it with `createRequire` pinned to the harness:
 
-```bash
-NODE_PATH=~/.pi/agent/node_modules node /tmp/debug.mjs
+```js
+// /tmp/debug.mjs — run with plain `node /tmp/debug.mjs`
+import { createRequire } from "node:module";
+import { homedir } from "node:os";
+const require = createRequire(`${homedir()}/.pi/agent/noop.js`);
+const { chromium, devices } = require("playwright");
+const { expect } = require("playwright/test"); // only when asserting
 ```
 
-In the script: `import { chromium, devices, expect } from "playwright";`
-(`expect` comes from `playwright/test` — import it only when asserting).
 Long-running scripts (watch a flow, keep a trace open) belong in
 `bg_start`, one-shots in bash. Always `await browser.close()` in a
 `finally`.
@@ -46,8 +50,9 @@ await context.tracing.start({ screenshots: true, snapshots: true });
 await context.tracing.stop({ path: "/tmp/trace.zip" });
 ```
 
-Tell the user to open it with:
-`NODE_PATH=~/.pi/agent/node_modules npx playwright show-trace /tmp/trace.zip`
+Tell the user to open it with the harness's own playwright binary
+(npx from another cwd would download a mismatched copy):
+`~/.pi/agent/node_modules/.bin/playwright show-trace /tmp/trace.zip`
 
 **Auth / storage state** (log in once, reuse forever)
 
@@ -59,7 +64,6 @@ const context2 = await browser.newContext({ storageState: "/tmp/auth.json" });
 **Device emulation**
 
 ```js
-import { devices } from "playwright";
 const context = await browser.newContext({ ...devices["iPhone 15"] });
 ```
 
@@ -73,10 +77,9 @@ const [download] = await Promise.all([
 await download.saveAs(`/tmp/${download.suggestedFilename()}`);
 ```
 
-**Assertions** (auto-retrying, from playwright/test)
+**Assertions** (auto-retrying, via `require("playwright/test")`)
 
 ```js
-import { expect } from "playwright/test";
 await expect(page.getByRole("alert")).toHaveText(/saved/i);
 ```
 
