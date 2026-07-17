@@ -15,6 +15,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { sortRunningFirst } from "../shared/agent-format.ts";
 import type { OverlayTheme } from "../shared/overlay.ts";
 import { showTerminalsDashboard } from "./dashboard.ts";
 import { createDemoTerminals, demoTerminalsHost } from "./src/demo.ts";
@@ -348,7 +349,12 @@ export default function backgroundTerminals(pi: ExtensionAPI) {
         return;
       }
       await showTerminalsDashboard(ctx, {
-        list: () => manager.list(),
+        list: () =>
+          sortRunningFirst(
+            manager.list(),
+            (e) => e.status === "running",
+            (e) => e.startedAt,
+          ),
         kill: (id) => {
           // Mirror bg_kill: a terminal the user kills by hand should not
           // be re-announced as a completion follow-up.

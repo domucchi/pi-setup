@@ -248,8 +248,19 @@ class TerminalsDashboard {
       Math.max(0, ...entries.map((e) => e.title.length)),
     );
     const rows: string[] = [];
+    let dividerDrawn = false;
     for (const [i, entry] of window.items.entries()) {
       const index = window.offset + i;
+      // Thin divider where the running block ends (list is running-first).
+      if (
+        !dividerDrawn &&
+        entry.status !== "running" &&
+        index > 0 &&
+        entries[index - 1]?.status === "running"
+      ) {
+        rows.push(theme.fg("borderMuted", ` ${"─".repeat(Math.max(0, width - 4))}`));
+        dividerDrawn = true;
+      }
       const selected = index === this.listIndex;
       const marker = selected ? theme.fg("accent", "❯") : " ";
       const icon = theme.fg(statusColorKey(entry.status), statusIcon(entry.status));
