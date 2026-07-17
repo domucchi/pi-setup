@@ -3,7 +3,7 @@
  * execution. Design: extensions/workflows/DESIGN.md. The script runs in
  * a permission-restricted Node child (src/sandbox*), agents run through
  * subagents' createChild with in-memory sessions (src/runner), and
- * every run leaves an audit trail + resume-ready journal on disk
+ * every run leaves a rehydratable audit trail + replay journal on disk
  * (src/artifacts).
  */
 
@@ -32,19 +32,22 @@ import {
   STATUS_PARAMETER_DESCRIPTIONS,
   WORKFLOW_STATUS_DESCRIPTION,
   WORKFLOW_DESCRIPTION,
-  WORKFLOW_PROMPT_GUIDELINES,
-  WORKFLOW_PROMPT_SNIPPET,
 } from "./prompt.ts";
 import {
   createRunStore,
   hashForJournal,
+  loadResumeSource,
+  loadSessionRunsFromDisk,
   newRunId,
+  normalizeWorkflowCwd,
   type RunRecord,
 } from "./src/artifacts.ts";
 import { extractMeta, type WorkflowPhase } from "./src/meta.ts";
 import { resolveNamedWorkflow } from "./src/named.ts";
+import { createPrefixReplayer, type ReplayEntry } from "./src/replay.ts";
 import { createAgentRunner, type RunnerEvent } from "./src/runner.ts";
 import { runWorkflowSandbox, type SandboxResult } from "./src/sandbox.ts";
+import { referencedWorkflowRunIds } from "./src/session.ts";
 
 const MAX_AGENT_CALLS = 32;
 const MAX_AGENT_ACTIVITY = 8;
@@ -78,12 +81,25 @@ export interface ActiveRun {
   agents: Map<number, ActiveAgent>;
   logs: string[];
   abort: AbortController;
+  /** Loaded from disk rather than started by this extension instance. */
+  rehydrated?: boolean;
 }
 
 export default function workflows(pi: ExtensionAPI) {
   let currentCtx: ExtensionContext | undefined;
+  let shuttingDown = false;
   const activeRuns = new Map<string, ActiveRun>();
   const pendingResults = new Map<string, string>();
+  const liveTasks = new Set<Promise<unknown>>();
+
+  const trackTask = <T>(task: Promise<T>) => {
+    liveTasks.add(task);
+    void task.then(
+      () => liveTasks.delete(task),
+      () => liveTasks.delete(task),
+    );
+    return task;
+  };
 
   const sendResult = (runId: string, text: string) => {
     pi.sendMessage(
@@ -94,6 +110,7 @@ export default function workflows(pi: ExtensionAPI) {
 
   /** Deliver a background result now if idle, else on the next agent_settled. */
   const deliverOrQueue = (runId: string, text: string) => {
+    if (shuttingDown) return;
     if (currentCtx?.isIdle()) sendResult(runId, text);
     else pendingResults.set(runId, text);
   };
@@ -146,6 +163,7 @@ export default function workflows(pi: ExtensionAPI) {
     const rows: WidgetRun[] = [];
     for (const run of activeRuns.values()) {
       const record = run.record;
+      if (run.rehydrated && record.status !== "running") continue;
       if (
         record.status !== "running" &&
         (record.settledAt === null || now - record.settledAt > WIDGET_LINGER_MS)
@@ -208,15 +226,44 @@ export default function workflows(pi: ExtensionAPI) {
   };
 
   pi.on("session_start", (_event, ctx) => {
+    shuttingDown = false;
     currentCtx = ctx;
+    const liveIds = new Set(
+      [...activeRuns.values()]
+        .filter((run) => run.record.status === "running" && !run.rehydrated)
+        .map((run) => run.record.runId),
+    );
+    const referencedRunIds = referencedWorkflowRunIds(
+      ctx.sessionManager.getBranch(),
+    );
+    for (const loaded of loadSessionRunsFromDisk(
+      liveIds,
+      ctx.sessionManager.getSessionId(),
+      referencedRunIds,
+    )) {
+      if (activeRuns.has(loaded.record.runId)) continue;
+      activeRuns.set(loaded.record.runId, {
+        record: loaded.record,
+        dir: loaded.dir,
+        phases: loaded.phases,
+        agents: new Map(loaded.agents.map((agent) => [agent.seq, agent])),
+        logs: [],
+        abort: new AbortController(),
+        rehydrated: true,
+      });
+    }
+    updateWidget();
   });
 
   pi.on("agent_settled", () => {
-    for (const [runId, text] of pendingResults) sendResult(runId, text);
+    if (!shuttingDown) {
+      for (const [runId, text] of pendingResults) sendResult(runId, text);
+    }
     pendingResults.clear();
   });
 
-  pi.on("session_shutdown", () => {
+  pi.on("session_shutdown", async () => {
+    shuttingDown = true;
     currentCtx = undefined;
     pendingResults.clear();
     if (widgetTimer) {
@@ -225,13 +272,11 @@ export default function workflows(pi: ExtensionAPI) {
     }
     widgetVisible = false;
     nudgeWidget = undefined;
-    for (const run of activeRuns.values()) {
-      run.abort.abort();
-      if (run.record.status === "running") {
-        run.record.status = "aborted";
-        run.record.settledAt = Date.now();
-      }
-    }
+    for (const run of activeRuns.values()) run.abort.abort();
+    await Promise.allSettled([...liveTasks]);
+    // Background completion callbacks run as part of tracked tasks, but keep
+    // this clear as a final guard against stale follow-ups crossing runtimes.
+    pendingResults.clear();
   });
 
   // Follow-up results collapse to their summary line; ctrl+o expands.
@@ -255,12 +300,14 @@ export default function workflows(pi: ExtensionAPI) {
     );
   });
 
-  async function executeRun(options: {
+  async function executeRunInternal(options: {
     source: string;
     args: unknown;
     ctx: ExtensionContext;
     signal: AbortSignal | undefined;
     runId?: string;
+    resumedFrom?: string;
+    replayEntries?: readonly ReplayEntry[];
     onProgress?: (text: string) => void;
   }): Promise<{ record: RunRecord; result: SandboxResult; dir: string }> {
     const { meta, body } = extractMeta(options.source);
@@ -280,6 +327,10 @@ export default function workflows(pi: ExtensionAPI) {
       startedAt: Date.now(),
       settledAt: null,
       agentCount: 0,
+      ownerPid: process.pid,
+      cwd: normalizeWorkflowCwd(options.ctx.cwd),
+      sessionId: options.ctx.sessionManager.getSessionId(),
+      ...(options.resumedFrom ? { resumedFrom: options.resumedFrom } : {}),
     };
     const run: ActiveRun = {
       record,
@@ -303,6 +354,73 @@ export default function workflows(pi: ExtensionAPI) {
     };
 
     const requestMeta = new Map<number, { promptHash: string; optsHash: string }>();
+    const replayer = options.replayEntries
+      ? createPrefixReplayer(options.replayEntries)
+      : undefined;
+    const handleRunnerEvent = (event: RunnerEvent) => {
+      if (event.state === "started") {
+        record.agentCount += 1;
+        run.agents.set(event.seq, {
+          seq: event.seq,
+          label: event.label,
+          phase: event.phase,
+          state: "running",
+          prompt: event.prompt,
+          agentType: event.agentType,
+          activity: [],
+          startedAt: Date.now(),
+        });
+      } else if (event.state === "activity") {
+        const agent = run.agents.get(event.seq);
+        if (agent) {
+          if (event.preview) {
+            agent.activity.push(event.preview);
+            if (agent.activity.length > MAX_AGENT_ACTIVITY) agent.activity.shift();
+          }
+          agent.model = event.model ?? agent.model;
+          agent.tokens = event.tokens ?? agent.tokens;
+          agent.contextWindow = event.contextWindow ?? agent.contextWindow;
+          agent.toolCalls = event.toolCalls ?? agent.toolCalls;
+        }
+      } else {
+        const agent = run.agents.get(event.seq);
+        if (agent) {
+          agent.state = event.ok ? "ok" : "failed";
+          agent.error = event.error;
+          agent.durationMs = event.durationMs;
+          agent.output = event.output?.slice(0, 2_000);
+          agent.model = event.model ?? agent.model;
+          agent.tokens = event.tokens ?? agent.tokens;
+          agent.contextWindow = event.contextWindow ?? agent.contextWindow;
+          agent.toolCalls = event.toolCalls ?? agent.toolCalls;
+        }
+        const hashes = requestMeta.get(event.seq);
+        // Both fresh and replayed calls take this one persistence path, so
+        // the new run has exactly one journal row + full artifact per call.
+        const resultRef = store.saveAgentResult({
+          seq: event.seq,
+          ok: event.ok ?? false,
+          prompt: agent?.prompt,
+          output: event.output,
+          structured: event.structured,
+          error: event.error,
+        });
+        store.appendJournal({
+          seq: event.seq,
+          promptHash: hashes?.promptHash ?? "",
+          optsHash: hashes?.optsHash ?? "",
+          label: event.label,
+          phase: event.phase,
+          ok: event.ok ?? false,
+          error: event.error,
+          outputHead: event.output?.slice(0, 200),
+          resultRef,
+        });
+      }
+      updateWidget();
+      progress();
+    };
+
     // createAgentRunner does not throw; safe to hold as a const for finally.
     const runner = createAgentRunner({
       context: {
@@ -312,69 +430,7 @@ export default function workflows(pi: ExtensionAPI) {
         parentModel: options.ctx.model,
       },
       signal: abort.signal,
-      onEvent: (event: RunnerEvent) => {
-        if (event.state === "started") {
-          record.agentCount += 1;
-          run.agents.set(event.seq, {
-            seq: event.seq,
-            label: event.label,
-            phase: event.phase,
-            state: "running",
-            prompt: event.prompt,
-            agentType: event.agentType,
-            activity: [],
-            startedAt: Date.now(),
-          });
-        } else if (event.state === "activity") {
-          const agent = run.agents.get(event.seq);
-          if (agent) {
-            if (event.preview) {
-              agent.activity.push(event.preview);
-              if (agent.activity.length > MAX_AGENT_ACTIVITY) agent.activity.shift();
-            }
-            agent.model = event.model ?? agent.model;
-            agent.tokens = event.tokens ?? agent.tokens;
-            agent.contextWindow = event.contextWindow ?? agent.contextWindow;
-            agent.toolCalls = event.toolCalls ?? agent.toolCalls;
-          }
-        } else {
-          const agent = run.agents.get(event.seq);
-          if (agent) {
-            agent.state = event.ok ? "ok" : "failed";
-            agent.error = event.error;
-            agent.durationMs = event.durationMs;
-            agent.output = event.output?.slice(0, 2_000);
-            agent.model = event.model ?? agent.model;
-            agent.tokens = event.tokens ?? agent.tokens;
-            agent.contextWindow = event.contextWindow ?? agent.contextWindow;
-            agent.toolCalls = event.toolCalls ?? agent.toolCalls;
-          }
-          const hashes = requestMeta.get(event.seq);
-          // Persist the full outcome so a future resume can replay this
-          // agent() call without re-running it; journal references it.
-          const resultRef = store.saveAgentResult({
-            seq: event.seq,
-            ok: event.ok ?? false,
-            prompt: agent?.prompt,
-            output: event.output,
-            structured: event.structured,
-            error: event.error,
-          });
-          store.appendJournal({
-            seq: event.seq,
-            promptHash: hashes?.promptHash ?? "",
-            optsHash: hashes?.optsHash ?? "",
-            label: event.label,
-            phase: event.phase,
-            ok: event.ok ?? false,
-            error: event.error,
-            outputHead: event.output?.slice(0, 200),
-            resultRef,
-          });
-        }
-        updateWidget();
-        progress();
-      },
+      onEvent: handleRunnerEvent,
     });
 
     // Everything fallible runs here; the finally guarantees the run is
@@ -399,11 +455,43 @@ export default function workflows(pi: ExtensionAPI) {
             run.logs.push(message);
             progress();
           },
-          runAgent: (request) => {
-            requestMeta.set(request.id, {
+          runAgent: async (request) => {
+            const hashes = {
               promptHash: hashForJournal(request.prompt),
               optsHash: hashForJournal(request.opts),
-            });
+            };
+            requestMeta.set(request.id, hashes);
+            const replay = replayer?.tryReplay({ seq: request.id, ...hashes });
+            if (replay?.hit) {
+              const label = request.opts.label ?? `agent-${request.id}`;
+              handleRunnerEvent({
+                seq: request.id,
+                label,
+                phase: request.opts.phase,
+                state: "started",
+                prompt: request.prompt,
+                agentType: request.opts.agentType ?? "worker",
+              });
+              handleRunnerEvent({
+                seq: request.id,
+                label,
+                phase: request.opts.phase,
+                state: "activity",
+                preview: `↻ replayed from ${options.resumedFrom ?? "source run"}`,
+              });
+              handleRunnerEvent({
+                seq: request.id,
+                label,
+                phase: request.opts.phase,
+                state: "settled",
+                ok: replay.outcome.ok,
+                output: replay.outcome.output,
+                structured: replay.outcome.structured,
+                error: replay.outcome.error,
+                durationMs: 0,
+              });
+              return replay.outcome;
+            }
             return runner.run(request);
           },
         },
@@ -432,27 +520,74 @@ export default function workflows(pi: ExtensionAPI) {
     }
   }
 
+  function executeRun(
+    options: Parameters<typeof executeRunInternal>[0],
+  ) {
+    return trackTask(executeRunInternal(options));
+  }
+
+  function startBackgroundRun(options: {
+    source: string;
+    args: unknown;
+    ctx: ExtensionContext;
+    resumedFrom?: string;
+    replayEntries?: readonly ReplayEntry[];
+  }) {
+    // Validate meta and allocate the runId before detaching so callers can
+    // report the new ID immediately.
+    const { meta } = extractMeta(options.source);
+    const runId = newRunId();
+    const backgroundTask = executeRun({
+      ...options,
+      signal: undefined,
+      runId,
+    })
+      .then(({ record, result, dir }) => {
+        deliverOrQueue(
+          record.runId,
+          buildRunResult(record, result.ok ? result.value : undefined, dir),
+        );
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        deliverOrQueue(
+          runId,
+          buildBackgroundFailureMessage(meta.name, runId, message),
+        );
+      });
+    trackTask(backgroundTask);
+    return { runId, name: meta.name };
+  }
+
   pi.registerTool({
     name: "workflow",
     label: "Workflow",
     description: WORKFLOW_DESCRIPTION,
-    promptSnippet: WORKFLOW_PROMPT_SNIPPET,
-    promptGuidelines: WORKFLOW_PROMPT_GUIDELINES,
     parameters: Type.Object({
       script: Type.Optional(
         Type.String({ description: PARAMETER_DESCRIPTIONS.script }),
       ),
       name: Type.Optional(Type.String({ description: PARAMETER_DESCRIPTIONS.name })),
+      resume_run_id: Type.Optional(
+        Type.String({ description: PARAMETER_DESCRIPTIONS.resumeRunId }),
+      ),
       args: Type.Optional(Type.Unknown({ description: PARAMETER_DESCRIPTIONS.args })),
       background: Type.Optional(
         Type.Boolean({ description: PARAMETER_DESCRIPTIONS.background }),
       ),
     }),
     async execute(_id, params, signal, onUpdate, ctx) {
-      if (!params.script === !params.name) {
-        throw new Error("Pass exactly one of script or name.");
+      const selectors = [params.script, params.name, params.resume_run_id].filter(
+        (value) => value !== undefined,
+      );
+      if (selectors.length !== 1) {
+        throw new Error("Pass exactly one of script, name, or resume_run_id.");
       }
+
       let source = params.script;
+      let args = params.args;
+      let resumedFrom: string | undefined;
+      let replayEntries: readonly ReplayEntry[] | undefined;
       if (params.name) {
         const named = resolveNamedWorkflow(params.name, ctx.cwd);
         if (!named) {
@@ -461,51 +596,53 @@ export default function workflows(pi: ExtensionAPI) {
           );
         }
         source = named.source;
+      } else if (params.resume_run_id) {
+        if (Object.prototype.hasOwnProperty.call(params, "args")) {
+          throw new Error(
+            "Do not pass args with resume_run_id; resume uses the source run's stored args.",
+          );
+        }
+        if (activeRuns.get(params.resume_run_id)?.record.status === "running") {
+          throw new Error(
+            `Workflow "${params.resume_run_id}" is still running; wait for it to settle before resuming.`,
+          );
+        }
+        const stored = loadResumeSource(params.resume_run_id, ctx.cwd);
+        source = stored.source;
+        args = stored.args;
+        resumedFrom = stored.record.runId;
+        replayEntries = stored.replayEntries;
+      }
+      if (source === undefined) {
+        throw new Error("Workflow source could not be resolved.");
       }
 
       if (params.background) {
-        // Validate meta and allocate the runId BEFORE detaching, so the
-        // tool result can return it immediately (per DESIGN.md).
-        const { meta } = extractMeta(source!);
-        const runId = newRunId();
-        executeRun({
-          source: source!,
-          args: params.args,
+        const started = startBackgroundRun({
+          source,
+          args,
           ctx,
-          signal: undefined,
-          runId,
-        })
-          .then(({ record, result, dir }) => {
-            deliverOrQueue(
-              record.runId,
-              buildRunResult(record, result.ok ? result.value : undefined, dir),
-            );
-          })
-          .catch((error) => {
-            // executeRun already finalized status + disk and disposed the
-            // runner in its finally; the detached path only notifies.
-            const message = error instanceof Error ? error.message : String(error);
-            deliverOrQueue(
-              runId,
-              buildBackgroundFailureMessage(meta.name, runId, message),
-            );
-          });
+          resumedFrom,
+          replayEntries,
+        });
         return {
           content: [
             {
               type: "text" as const,
-              text: buildBackgroundStartMessage(meta.name, runId),
+              text: buildBackgroundStartMessage(started.name, started.runId),
             },
           ],
-          details: { runId, status: "running" },
+          details: { runId: started.runId, status: "running", resumedFrom },
         };
       }
 
       const { record, result, dir } = await executeRun({
-        source: source!,
-        args: params.args,
+        source,
+        args,
         ctx,
         signal,
+        resumedFrom,
+        replayEntries,
         onProgress: (text) =>
           onUpdate?.({ content: [{ type: "text" as const, text }], details: {} }),
       });
@@ -516,7 +653,11 @@ export default function workflows(pi: ExtensionAPI) {
             text: buildRunResult(record, result.ok ? result.value : undefined, dir),
           },
         ],
-        details: { runId: record.runId, status: record.status },
+        details: {
+          runId: record.runId,
+          status: record.status,
+          resumedFrom: record.resumedFrom,
+        },
       };
     },
     // The result JSON matters to the model; the human gets the summary
@@ -547,8 +688,8 @@ export default function workflows(pi: ExtensionAPI) {
         const known = [...activeRuns.keys()];
         throw new Error(
           known.length > 0
-            ? `No run "${params.run_id}" in this session. Known runs: ${known.join(", ")}.`
-            : `No workflow runs in this session.`,
+            ? `No workflow run "${params.run_id}". Known runs: ${known.join(", ")}.`
+            : `No workflow runs found in memory or on disk.`,
         );
       }
       return {
@@ -617,9 +758,8 @@ export default function workflows(pi: ExtensionAPI) {
         }
         return;
       }
-      // Only this session's runs (active + completed, held in memory for the
-      // process). Past runs from other sessions live on disk but would be
-      // noise here; resumed-session rehydration from disk is a future TODO.
+      // session_start rehydrates inspectable disk runs into the same map, so
+      // the dashboard has one live-updating host for current and past runs.
       const toView = (run: ActiveRun): RunView => ({
         record: run.record,
         phases: run.phases,
@@ -639,6 +779,16 @@ export default function workflows(pi: ExtensionAPI) {
                 : (run.record.settledAt ?? run.record.startedAt),
           ).map(toView),
         stop: (runId) => activeRuns.get(runId)?.abort.abort(),
+        resume: (runId) => {
+          const stored = loadResumeSource(runId, ctx.cwd);
+          return startBackgroundRun({
+            source: stored.source,
+            args: stored.args,
+            ctx,
+            resumedFrom: stored.record.runId,
+            replayEntries: stored.replayEntries,
+          }).runId;
+        },
       });
     },
   });

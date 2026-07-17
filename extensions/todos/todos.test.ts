@@ -8,6 +8,7 @@ import {
   strike,
   summarize,
   todoCounts,
+  windowSummary,
   type Todo,
 } from "./src/todos.ts";
 
@@ -63,8 +64,10 @@ describe("displayWindow", () => {
     expect(windowed.doneCollapsed).toBe(2); // d1+d2 merged, d3 stays visible
     expect(windowed.shown[0].text).toBe("d3");
     expect(windowed.shown[1].text).toBe("current");
-    expect(windowed.shown).toHaveLength(5); // 6 rows − 1 done-summary line
+    expect(windowed.shown).toHaveLength(5); // 6 rows − 1 combined metadata line
     expect(windowed.hidden).toBe(3);
+    expect(windowSummary(windowed)).toBe("+3 more, 2 completed");
+    expect(windowed.shown.length + 1).toBeLessThanOrEqual(6);
   });
 
   it("shows the tail when everything is completed", () => {
@@ -74,6 +77,12 @@ describe("displayWindow", () => {
     expect(windowed.shown[0].text).toBe("d5");
     expect(windowed.shown).toHaveLength(5);
     expect(windowed.hidden).toBe(0);
+    expect(windowSummary(windowed)).toBe("5 completed");
+  });
+
+  it("omits empty metadata buckets", () => {
+    expect(windowSummary({ hidden: 4, doneCollapsed: 0 })).toBe("+4 more");
+    expect(windowSummary({ hidden: 0, doneCollapsed: 0 })).toBe("");
   });
 });
 

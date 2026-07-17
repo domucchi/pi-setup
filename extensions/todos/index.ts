@@ -9,7 +9,12 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { Text, truncateToWidth } from "@earendil-works/pi-tui";
+import {
+  Text,
+  truncateToWidth,
+  type Component,
+  type TUI,
+} from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { OverlayTheme } from "../shared/overlay.ts";
 import {
@@ -27,22 +32,47 @@ import {
   parseTodos,
   strike,
   summarize,
+  windowSummary,
   type Todo,
 } from "./src/todos.ts";
 
 const WIDGET_LINGER_MS = 60_000;
 const WIDGET_TICK_MS = 5_000;
 const WIDGET_MAX_LINES = 6;
+const GAP_FILTER_FLAG = "__piTodoGapFilter";
 
-/** One checklist line, CC-style: struck done, bold current, quiet pending. */
-function todoLine(theme: OverlayTheme, todo: Todo): string {
+interface GapFilterState {
+  connected: boolean;
+}
+
+type WidgetContainer = Component & {
+  children?: Component[];
+  addChild?: ((component: Component) => void) & {
+    [GAP_FILTER_FLAG]?: GapFilterState;
+  };
+  removeChild?: (component: Component) => void;
+};
+
+/** Cross-package structural check: instanceof fails across Pi's TUI copies. */
+function isSpacer(component: Component | undefined) {
+  const candidate = component as
+    | (Component & { lines?: unknown; setLines?: unknown })
+    | undefined;
+  return (
+    typeof candidate?.lines === "number" &&
+    typeof candidate.setLines === "function"
+  );
+}
+
+/** Todo markers are deliberately distinct from process/agent state glyphs. */
+function todoLine(theme: OverlayTheme, todo: Todo, prefix = " "): string {
   switch (todo.status) {
     case "completed":
-      return ` ${theme.fg("success", "✓")} ${theme.fg("dim", strike(todo.text))}`;
+      return `${prefix}${theme.fg("success", "✓")} ${theme.fg("dim", strike(todo.text))}`;
     case "in_progress":
-      return ` ${theme.fg("warning", "◆")} ${theme.fg("text", theme.bold(todo.text))}`;
+      return `${prefix}${theme.fg("accent", "■")} ${theme.fg("text", theme.bold(todo.text))}`;
     case "pending":
-      return ` ${theme.fg("dim", "☐")} ${theme.fg("muted", todo.text)}`;
+      return `${prefix}${theme.fg("dim", "□")} ${theme.fg("muted", todo.text)}`;
   }
 }
 
@@ -53,20 +83,88 @@ export default function todos(pi: ExtensionAPI) {
   let widgetVisible = false;
   let widgetTimer: ReturnType<typeof setInterval> | undefined;
   let nudgeWidget: (() => void) | undefined;
+  let agentWorking = false;
+  let widgetTui: TUI | undefined;
+  let widgetComponent: Component | undefined;
+  let gapFilterState: GapFilterState | undefined;
 
   const widgetLines = (theme: OverlayTheme, width: number): string[] => {
     const { doneCollapsed, shown, hidden } = displayWindow(list, WIDGET_MAX_LINES);
     const lines: string[] = [];
-    if (doneCollapsed > 0) {
+    let row = 0;
+    // While Pi's Working/Thinking line is visible directly above this widget,
+    // nest the checklist under it like one activity tree. At rest the list
+    // returns to its normal compact indentation.
+    const prefix = () => {
+      if (!agentWorking) return " ";
+      return row++ === 0 ? theme.fg("dim", "  └ ") : "    ";
+    };
+    for (const todo of shown) {
+      lines.push(truncateToWidth(todoLine(theme, todo, prefix()), width));
+    }
+    const metadata = windowSummary({ hidden, doneCollapsed });
+    if (metadata) {
       lines.push(
-        ` ${theme.fg("success", "✓")} ${theme.fg("dim", `+${doneCollapsed} done`)}`,
+        truncateToWidth(`${prefix()}  ${theme.fg("dim", metadata)}`, width),
       );
     }
-    for (const todo of shown) {
-      lines.push(truncateToWidth(todoLine(theme, todo), width));
-    }
-    if (hidden > 0) lines.push(theme.fg("dim", `   … +${hidden} more`));
     return lines;
+  };
+
+  // Pi deliberately inserts a leading Spacer before every above-editor
+  // widget group. While the Working/Thinking row is present, suppress that
+  // one spacer so the todo branch visually attaches to it. This is a small
+  // structural patch because the extension API has no spacing option.
+  const syncWorkingGap = () => {
+    if (!widgetTui || !widgetComponent) return;
+    const component = widgetComponent;
+    const parent = widgetTui.children
+      .map((child) => child as WidgetContainer)
+      .find((child) => child.children?.includes(component));
+    if (!parent?.children || !parent.addChild || !parent.removeChild) return;
+
+    let state = parent.addChild[GAP_FILTER_FLAG];
+    if (!state) {
+      state = { connected: false };
+      const original = parent.addChild.bind(parent);
+      const wrapped = ((component: Component) => {
+        if (
+          state!.connected &&
+          parent.children?.length === 0 &&
+          isSpacer(component)
+        ) {
+          return;
+        }
+        original(component);
+      }) as WidgetContainer["addChild"];
+      wrapped![GAP_FILTER_FLAG] = state;
+      parent.addChild = wrapped;
+    }
+
+    gapFilterState = state;
+    state.connected = agentWorking && widgetVisible;
+    if (state.connected && isSpacer(parent.children[0])) {
+      parent.removeChild(parent.children[0]!);
+    }
+  };
+
+  const mountWidget = () => {
+    if (!currentCtx) return;
+    currentCtx.ui.setWidget(
+      "todos",
+      (tui, theme) => {
+        nudgeWidget = () => tui.requestRender();
+        const component: Component = {
+          invalidate() {},
+          render: (width: number) => widgetLines(theme, width),
+        };
+        widgetTui = tui;
+        widgetComponent = component;
+        return component;
+      },
+      { placement: "aboveEditor" },
+    );
+    syncWorkingGap();
   };
 
   // Visible while the list has an unfinished item; a fully-completed
@@ -80,8 +178,11 @@ export default function todos(pi: ExtensionAPI) {
       (!allDone(list) ||
         (completedAt !== undefined && now - completedAt <= WIDGET_LINGER_MS));
     if (!visible) {
+      if (gapFilterState) gapFilterState.connected = false;
       if (widgetVisible) currentCtx.ui.setWidget("todos", undefined);
       widgetVisible = false;
+      widgetTui = undefined;
+      widgetComponent = undefined;
       nudgeWidget = undefined;
       if (widgetTimer) {
         clearInterval(widgetTimer);
@@ -95,19 +196,12 @@ export default function todos(pi: ExtensionAPI) {
         nudgeWidget?.();
       }, WIDGET_TICK_MS);
     }
-    if (widgetVisible) return;
+    if (widgetVisible) {
+      syncWorkingGap();
+      return;
+    }
     widgetVisible = true;
-    currentCtx.ui.setWidget(
-      "todos",
-      (tui, theme) => {
-        nudgeWidget = () => tui.requestRender();
-        return {
-          invalidate() {},
-          render: (width: number) => widgetLines(theme, width),
-        };
-      },
-      { placement: "aboveEditor" },
-    );
+    mountWidget();
   };
 
   // A resumed session gets its list back from the LAST todo_write tool
@@ -138,6 +232,7 @@ export default function todos(pi: ExtensionAPI) {
 
   pi.on("session_start", (_event, ctx) => {
     currentCtx = ctx;
+    agentWorking = false;
     list = rehydrate(ctx);
     // A fully-done list should not reappear on resume: mark it already
     // past its linger window instead of restarting the countdown.
@@ -145,8 +240,32 @@ export default function todos(pi: ExtensionAPI) {
     updateWidget();
   });
 
+  pi.on("agent_start", () => {
+    agentWorking = true;
+    syncWorkingGap();
+    nudgeWidget?.();
+  });
+
+  pi.on("agent_settled", () => {
+    agentWorking = false;
+    if (gapFilterState) gapFilterState.connected = false;
+    if (allDone(list)) {
+      // The completed state was visible during the run; once Pi settles,
+      // remove the checklist instead of leaving a redundant all-done block.
+      list = [];
+      completedAt = undefined;
+      updateWidget();
+      return;
+    }
+    // Re-mount once so Pi restores its normal leading spacer at rest.
+    if (widgetVisible) mountWidget();
+    else nudgeWidget?.();
+  });
+
   pi.on("session_shutdown", () => {
+    if (gapFilterState) gapFilterState.connected = false;
     currentCtx = undefined;
+    agentWorking = false;
     list = [];
     if (widgetTimer) {
       clearInterval(widgetTimer);

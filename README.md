@@ -12,6 +12,9 @@ rather than installed as a package.
 - **background-terminals** — `bg_start`/`bg_status`/`bg_list`/`bg_kill` for
   long-running processes; `/ps` to inspect.
 - **file-search** — `fd` and `rg` as first-class tools.
+- **tool-loader** — keeps browser, background-terminal, subagent, workflow,
+  and web tool groups deferred until `load_tools` activates them; additive
+  loading uses Pi's native deferred-tool protocol on supported models.
 - **subagents** — children with markdown roles (`agents/*.md`) on three
   backends: in-process pi (default), real Claude Code (Agent SDK), and
   real Codex (`app-server`); interactive `subagent_send`; `/subagents`.

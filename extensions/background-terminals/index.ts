@@ -24,8 +24,6 @@ import {
   BG_LIST_DESCRIPTION,
   BG_PARAMETER_DESCRIPTIONS,
   BG_START_DESCRIPTION,
-  BG_START_PROMPT_GUIDELINES,
-  BG_START_PROMPT_SNIPPET,
   BG_STATUS_DESCRIPTION,
   buildCompletionMessage,
   buildListResult,
@@ -225,8 +223,6 @@ export default function backgroundTerminals(pi: ExtensionAPI) {
     name: "bg_start",
     label: "Background Start",
     description: BG_START_DESCRIPTION,
-    promptSnippet: BG_START_PROMPT_SNIPPET,
-    promptGuidelines: BG_START_PROMPT_GUIDELINES,
     parameters: Type.Object({
       command: Type.String({ description: BG_PARAMETER_DESCRIPTIONS.command }),
       title: Type.String({ description: BG_PARAMETER_DESCRIPTIONS.title }),

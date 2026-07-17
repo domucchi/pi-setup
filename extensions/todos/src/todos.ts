@@ -79,30 +79,38 @@ export function strike(text: string): string {
 }
 
 export interface TodoWindow {
-  /** Leading completed items collapsed into one "✓ N done" line. */
+  /** Leading completed items omitted from the visible work front. */
   doneCollapsed: number;
   shown: Todo[];
-  /** Trailing items beyond the cap ("… +N more"). */
+  /** Trailing open items omitted after the visible window. */
   hidden: number;
 }
 
+export function windowSummary(
+  window: Pick<TodoWindow, "hidden" | "doneCollapsed">,
+) {
+  const parts: string[] = [];
+  if (window.hidden > 0) parts.push(`+${window.hidden} more`);
+  if (window.doneCollapsed > 0) {
+    parts.push(`${window.doneCollapsed} completed`);
+  }
+  return parts.join(", ");
+}
+
 /**
- * Trim the display list to ~`max` rows while keeping the WORK FRONT
- * visible: leading completed items collapse into a single summary line
- * (they'd otherwise push the in_progress item off the cap) — except the
- * most recent one, which stays visible struck-through for continuity —
- * then the list from the first open item forward, then an overflow count.
+ * Keep the work front visible within `max` rows. When the list overflows,
+ * reserve the final row for combined metadata (`+N more, Y completed`), keep
+ * the most recent completed item for continuity, then show open work.
  */
 export function displayWindow(todos: Todo[], max: number): TodoWindow {
   if (todos.length <= max) return { doneCollapsed: 0, shown: todos, hidden: 0 };
   const firstOpen = todos.findIndex((t) => t.status !== "completed");
-  // Keep one completed item visible above the front; all-done shows the tail.
+  const shownBudget = Math.max(1, max - 1);
   const start =
     firstOpen === -1
-      ? Math.max(1, todos.length - (max - 1))
+      ? Math.max(0, todos.length - shownBudget)
       : Math.max(0, firstOpen - 1);
-  const budget = Math.max(1, max - (start > 0 ? 1 : 0));
-  const shown = todos.slice(start, start + budget);
+  const shown = todos.slice(start, start + shownBudget);
   return {
     doneCollapsed: start,
     shown,

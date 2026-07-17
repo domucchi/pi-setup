@@ -2,7 +2,7 @@
 
 ## State (2026-07-17)
 
-Functionally complete harness (10 hand-written extensions + MCP via
+Functionally complete harness (12 hand-written extensions + MCP via
 pi-mcp-adapter) with the full UI pass DONE. 220+ vitest tests, tsc clean
 (run `npm run verify` for the current count — this number drifts).
 See `PLAN.md` for architecture/decisions; `README.md`/`SETUP.md` for the map.
@@ -152,7 +152,5 @@ SETUP.md.
 ## Deferred backlog (PLAN.md / DESIGN.md)
 
 Jump into a subagent's live session (takeover UI), subagent
-dispose-on-settle (opt-in keep_alive), worktree isolation, workflow
-resume/replay (journal ready), notifications, protected-ops guard,
-subagent model roster in skills/subagents/SKILL.md (still placeholder),
-/workflows rehydration of past runs from disk.
+dispose-on-settle (opt-in keep_alive), worktree isolation, notifications,
+and protected-ops guard.

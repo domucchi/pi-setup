@@ -21,11 +21,7 @@ import {
   PARAMETER_DESCRIPTIONS,
   searchErrorMessage,
   WEB_FETCH_DESCRIPTION,
-  WEB_FETCH_GUIDELINES,
-  WEB_FETCH_SNIPPET,
   WEB_SEARCH_DESCRIPTION,
-  WEB_SEARCH_GUIDELINES,
-  WEB_SEARCH_SNIPPET,
 } from "./prompt.ts";
 import { fetchUrl } from "./src/fetch.ts";
 import { exaSearch } from "./src/search.ts";
@@ -35,8 +31,6 @@ export default function webAccess(pi: ExtensionAPI) {
     name: "web_search",
     label: "Web Search",
     description: WEB_SEARCH_DESCRIPTION,
-    promptSnippet: WEB_SEARCH_SNIPPET,
-    promptGuidelines: WEB_SEARCH_GUIDELINES,
     parameters: Type.Object({
       query: Type.String({ description: PARAMETER_DESCRIPTIONS.query }),
       num_results: Type.Optional(
@@ -91,8 +85,6 @@ export default function webAccess(pi: ExtensionAPI) {
     name: "web_fetch",
     label: "Web Fetch",
     description: WEB_FETCH_DESCRIPTION,
-    promptSnippet: WEB_FETCH_SNIPPET,
-    promptGuidelines: WEB_FETCH_GUIDELINES,
     parameters: Type.Object({
       url: Type.String({ description: PARAMETER_DESCRIPTIONS.url }),
     }),

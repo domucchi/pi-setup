@@ -20,11 +20,11 @@ Available in the script (nothing else — no imports, no fs, no network, no eval
 - pipeline(items, ...stages) → per-item chained stages with NO barrier between stages; each stage gets (prev, originalItem, index); a throwing stage drops that item to null. Prefer pipeline over parallel-then-parallel.
 - phase(title), log(message) — progress reporting to the user.
 - args — the tool call's args value, frozen.
-- Caps: 32 agent() calls per run. Math.random(), Date.now(), and argless new Date() throw (they would break future resume) — pass timestamps/randomness via args.
+- Caps: 32 agent() calls per run. Math.random(), Date.now(), and argless new Date() throw (they break deterministic resume/replay) — pass timestamps/randomness via args.
 
 Write self-contained agent prompts: children see nothing of this conversation. Use schema for any result you will merge or filter in code.
 
-Inputs: pass exactly one of script (inline) or name (saved workflow from .pi/workflows/ or .claude/workflows/). background: true returns the runId immediately and delivers the result when done.`;
+Inputs: pass exactly one of script (inline), name (saved workflow from .pi/workflows/ or .claude/workflows/), or resume_run_id. Resume requires a settled source run from the same cwd, starts a NEW run from its stored script + args, and replays the source run's unchanged consecutive agent-call prefix without spawning those children; after the first changed or unavailable call, that and all later calls execute normally. background: true works for new and resumed runs, returns the new runId immediately, and delivers the result when done.`;
 
 export const WORKFLOW_PROMPT_SNIPPET =
   "Run multi-agent orchestration scripts (workflows) when the user explicitly asks.";
@@ -36,17 +36,19 @@ export const WORKFLOW_PROMPT_GUIDELINES = [
 
 export const PARAMETER_DESCRIPTIONS = {
   script:
-    "Inline workflow script: `export const meta = {...}` followed by the body. Mutually exclusive with name.",
-  name: "Saved workflow name, resolved from .pi/workflows/<name>.js then .claude/workflows/<name>.js.",
-  args: "Value exposed to the script as the global `args` (JSON-serializable).",
+    "Inline workflow script: `export const meta = {...}` followed by the body. Mutually exclusive with name and resume_run_id.",
+  name: "Saved workflow name, resolved from .pi/workflows/<name>.js then .claude/workflows/<name>.js. Mutually exclusive with script and resume_run_id.",
+  resumeRunId:
+    "Settled stored run ID from the current cwd to resume into a NEW run. Uses the source run's script and args, replaying its unchanged consecutive journal prefix. Mutually exclusive with script and name; do not pass args.",
+  args: "Value exposed to a new script/name run as the global `args` (JSON-serializable). Do not pass with resume_run_id; stored args are reused.",
   background:
     "Run in the background: returns the runId immediately; the result arrives as a follow-up message when the run settles. Poll progress with workflow_status in the meantime.",
 };
 
 export const WORKFLOW_STATUS_DESCRIPTION =
   "Check on a workflow run without blocking: live phase and per-agent states " +
-  "for a running background workflow, or the recorded outcome of a finished one. " +
-  "Use this to poll progress after starting a workflow with background: true; " +
+  "for a running background workflow, or the disk-rehydrated outcome of a finished one. " +
+  "Runs remain inspectable after Pi restarts. Use this to poll progress after starting a workflow with background: true; " +
   "the final result still arrives as a follow-up message when the run settles.";
 
 export const STATUS_PARAMETER_DESCRIPTIONS = {
@@ -83,6 +85,7 @@ export function buildWorkflowStatus(
   const lines = [
     `Workflow "${record.name}" (${record.runId}) — ${record.status}, ${settled}/${record.agentCount} agents settled, ${elapsed}s.`,
   ];
+  if (record.resumedFrom) lines.push(`Resumed from: ${record.resumedFrom}`);
   if (record.error) lines.push(`Error: ${record.error}`);
   if (record.status === "running" && extras.currentPhase) {
     lines.push(`Current phase: ${extras.currentPhase}`);
@@ -118,6 +121,7 @@ export function buildRunResult(record: RunRecord, value: unknown, dir: string) {
   const lines = [
     `Workflow "${record.name}" ${record.status} — ${record.agentCount} agent(s), ${Math.round(((record.settledAt ?? Date.now()) - record.startedAt) / 1000)}s.`,
   ];
+  if (record.resumedFrom) lines.push(`Resumed from: ${record.resumedFrom}`);
   if (record.error) lines.push(`Error: ${record.error}`);
   if (value !== undefined && value !== null) {
     let json: string;

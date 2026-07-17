@@ -34,8 +34,6 @@ import {
   PARAMETER_DESCRIPTIONS,
   SEND_DESCRIPTION,
   SPAWN_DESCRIPTION,
-  SPAWN_PROMPT_GUIDELINES,
-  SPAWN_PROMPT_SNIPPET,
   WAIT_DESCRIPTION,
 } from "./prompt.ts";
 import { loadAgentDefinitions } from "./src/agents.ts";
@@ -292,8 +290,6 @@ export default function subagents(pi: ExtensionAPI) {
     name: "subagent_spawn",
     label: "Spawn Subagent",
     description: SPAWN_DESCRIPTION,
-    promptSnippet: SPAWN_PROMPT_SNIPPET,
-    promptGuidelines: SPAWN_PROMPT_GUIDELINES,
     parameters: Type.Object({
       prompt: Type.String({ description: PARAMETER_DESCRIPTIONS.prompt }),
       title: Type.String({ description: PARAMETER_DESCRIPTIONS.title }),

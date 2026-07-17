@@ -73,10 +73,12 @@ export interface RunView {
 }
 
 export interface DashboardHost {
-  /** All of this session's runs, newest first. */
+  /** Live and disk-rehydrated runs, running first then newest settled. */
   getRuns(): RunView[];
   /** Request an abort of a run (no-op when already settled). */
   stop(runId: string): void;
+  /** Resume a settled run in the background; returns the new run ID. */
+  resume?(runId: string): string;
 }
 
 export function showWorkflowsDashboard(
@@ -178,6 +180,24 @@ class WorkflowsDashboard {
     this.setNotice(`stopping ${run.record.name}…`);
   }
 
+  private resume(run: RunView | undefined) {
+    if (!run) return;
+    if (run.record.status === "running") {
+      this.setNotice("settle the run before resuming it");
+      return;
+    }
+    if (!this.host.resume) {
+      this.setNotice("resume is unavailable here");
+      return;
+    }
+    try {
+      const newRunId = this.host.resume(run.record.runId);
+      this.setNotice(`resumed as ${newRunId}`);
+    } catch (error) {
+      this.setNotice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   handleInput(data: string) {
     const up = matchesKey(data, Key.up) || data === "k";
     const down = matchesKey(data, Key.down) || data === "j";
@@ -196,6 +216,8 @@ class WorkflowsDashboard {
         }
       } else if (data === "x") {
         this.stop(runs[this.listIndex]);
+      } else if (data === "r") {
+        this.resume(runs[this.listIndex]);
       } else if (confirm && runs.length > 0) {
         this.currentRunId = runs[this.listIndex].record.runId;
         this.level = "panes";
@@ -219,6 +241,11 @@ class WorkflowsDashboard {
 
     if (data === "x") {
       this.stop(run);
+      this.tui.requestRender();
+      return;
+    }
+    if (data === "r") {
+      this.resume(run);
       this.tui.requestRender();
       return;
     }
@@ -324,7 +351,7 @@ class WorkflowsDashboard {
         ...panel(
           theme,
           "Runs",
-          [theme.fg("dim", " no workflow runs this session")],
+          [theme.fg("dim", " no workflow runs found")],
           width,
           panelHeight,
         ),
@@ -375,7 +402,7 @@ class WorkflowsDashboard {
     }
     lines.push(...panel(theme, "Runs", rows, width, panelHeight));
     lines.push(
-      this.hintLine("↑↓ select · enter open · x stop · esc close", width),
+      this.hintLine("↑↓ select · enter open · x stop · r resume · esc close", width),
     );
     return lines;
   }
@@ -518,11 +545,12 @@ class WorkflowsDashboard {
       lines.push(`${leftPanel[i] ?? ""} ${rightPanel[i] ?? ""}`);
     }
 
-    const stopHint = run.record.status === "running" ? "x stop · " : "";
+    const actionHint =
+      run.record.status === "running" ? "x stop · " : "r resume · ";
     const hint =
       this.focus === "phases"
-        ? `↑↓ select · → agents · ${stopHint}esc back`
-        : `↑↓ select · enter detail · ← phases · ${stopHint}esc back`;
+        ? `↑↓ select · → agents · ${actionHint}esc back`
+        : `↑↓ select · enter detail · ← phases · ${actionHint}esc back`;
     lines.push(this.hintLine(hint, width));
     return lines;
   }
@@ -653,8 +681,9 @@ class WorkflowsDashboard {
         : "Agent";
     lines.push(...panel(theme, title, visible, width, panelHeight));
 
-    const stopHint = run.record.status === "running" ? "x stop · " : "";
-    lines.push(this.hintLine(`↑↓ scroll · p prompt · ${stopHint}esc back`, width));
+    const actionHint =
+      run.record.status === "running" ? "x stop · " : "r resume · ";
+    lines.push(this.hintLine(`↑↓ scroll · p prompt · ${actionHint}esc back`, width));
     return lines;
   }
 }

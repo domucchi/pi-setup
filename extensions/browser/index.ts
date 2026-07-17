@@ -25,8 +25,6 @@ import {
   BROWSER_CONSOLE_DESCRIPTION,
   BROWSER_EVALUATE_DESCRIPTION,
   BROWSER_GOTO_DESCRIPTION,
-  BROWSER_PROMPT_GUIDELINES,
-  BROWSER_PROMPT_SNIPPET,
   BROWSER_REQUESTS_DESCRIPTION,
   BROWSER_SCREENSHOT_DESCRIPTION,
   BROWSER_SNAPSHOT_DESCRIPTION,
@@ -85,8 +83,6 @@ export default function browser(pi: ExtensionAPI) {
     name: "browser_goto",
     label: "Browser Goto",
     description: BROWSER_GOTO_DESCRIPTION,
-    promptSnippet: BROWSER_PROMPT_SNIPPET,
-    promptGuidelines: BROWSER_PROMPT_GUIDELINES,
     parameters: Type.Object({
       url: Type.String({ description: PARAMETER_DESCRIPTIONS.url }),
     }),
