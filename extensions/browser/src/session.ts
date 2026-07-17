@@ -8,11 +8,29 @@
 import { chromium, type Browser, type Page } from "playwright";
 
 const VIEWPORT = { width: 1280, height: 720 };
+const CONSOLE_BUFFER = 500;
+const REQUEST_BUFFER = 300;
+
+export interface ConsoleEntry {
+  level: string;
+  text: string;
+}
+
+export interface RequestEntry {
+  method: string;
+  url: string;
+  status?: number;
+  failure?: string;
+  resourceType: string;
+}
 
 export class BrowserSession {
   private browser: Browser | undefined;
   private page: Page | undefined;
   private launching: Promise<Page> | undefined;
+  /** Ring buffers, captured from page creation (not from first ask). */
+  readonly consoleLog: ConsoleEntry[] = [];
+  readonly requestLog: RequestEntry[] = [];
 
   hasPage(): boolean {
     return this.page !== undefined && !this.page.isClosed();
@@ -35,8 +53,10 @@ export class BrowserSession {
           this.browser = await chromium.launch({ headless: true });
         }
         const context = await this.browser.newContext({ viewport: VIEWPORT });
-        this.page = await context.newPage();
-        return this.page;
+        const page = await context.newPage();
+        this.attachInspectors(page);
+        this.page = page;
+        return page;
       })().finally(() => {
         this.launching = undefined;
       });
@@ -44,10 +64,46 @@ export class BrowserSession {
     return this.launching;
   }
 
+  private attachInspectors(page: Page) {
+    const pushConsole = (entry: ConsoleEntry) => {
+      this.consoleLog.push(entry);
+      if (this.consoleLog.length > CONSOLE_BUFFER) this.consoleLog.shift();
+    };
+    const pushRequest = (entry: RequestEntry) => {
+      this.requestLog.push(entry);
+      if (this.requestLog.length > REQUEST_BUFFER) this.requestLog.shift();
+    };
+    page.on("console", (message) => {
+      pushConsole({ level: message.type(), text: message.text() });
+    });
+    page.on("pageerror", (error) => {
+      pushConsole({ level: "error", text: String(error) });
+    });
+    page.on("response", (response) => {
+      const request = response.request();
+      pushRequest({
+        method: request.method(),
+        url: response.url(),
+        status: response.status(),
+        resourceType: request.resourceType(),
+      });
+    });
+    page.on("requestfailed", (request) => {
+      pushRequest({
+        method: request.method(),
+        url: request.url(),
+        failure: request.failure()?.errorText ?? "failed",
+        resourceType: request.resourceType(),
+      });
+    });
+  }
+
   async dispose() {
     const browser = this.browser;
     this.browser = undefined;
     this.page = undefined;
+    this.consoleLog.length = 0;
+    this.requestLog.length = 0;
     if (browser) {
       await browser.close().catch(() => {});
     }

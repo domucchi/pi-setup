@@ -1,4 +1,9 @@
 import { afterAll, describe, expect, it } from "vitest";
+import {
+  formatConsoleEntries,
+  formatEvaluateResult,
+  formatRequestEntries,
+} from "./src/inspect.ts";
 import { assertNavigable, BrowserSession } from "./src/session.ts";
 import { capSnapshot, presentSnapshot } from "./src/snapshot.ts";
 
@@ -49,6 +54,44 @@ describe("capSnapshot / presentSnapshot", () => {
   });
 });
 
+describe("inspection formatting", () => {
+  it("formats console tails with an overflow header", () => {
+    expect(formatConsoleEntries([], 10)).toBe("(no console output)");
+    const entries = Array.from({ length: 5 }, (_, i) => ({
+      level: "log",
+      text: `m${i}`,
+    }));
+    const text = formatConsoleEntries(entries, 2);
+    expect(text).toContain("(showing last 2 of 5 entries)");
+    expect(text).toContain("[log] m4");
+    expect(text).not.toContain("m2");
+  });
+
+  it("formats requests with status/failure and filtering", () => {
+    const entries = [
+      { method: "GET", url: "http://x/api/a", status: 200, resourceType: "xhr" },
+      {
+        method: "POST",
+        url: "http://x/api/b",
+        failure: "net::ERR_FAILED",
+        resourceType: "fetch",
+      },
+      { method: "GET", url: "http://x/logo.png", status: 304, resourceType: "image" },
+    ];
+    const text = formatRequestEntries(entries, 40, "/api/");
+    expect(text).toContain("200 GET http://x/api/a (xhr)");
+    expect(text).toContain("FAIL POST http://x/api/b — net::ERR_FAILED (fetch)");
+    expect(text).not.toContain("logo.png");
+    expect(formatRequestEntries([], 40)).toBe("(no requests recorded)");
+  });
+
+  it("stringifies evaluate results within a budget", () => {
+    expect(formatEvaluateResult({ a: 1 })).toBe('{\n  "a": 1\n}');
+    expect(formatEvaluateResult(undefined)).toBe("undefined");
+    expect(formatEvaluateResult("x".repeat(20), 10)).toContain("[result clipped");
+  });
+});
+
 describe("BrowserSession (real chromium)", () => {
   const session = new BrowserSession();
 
@@ -70,6 +113,22 @@ describe("BrowserSession (real chromium)", () => {
       expect(ref).toBeDefined();
       await page.locator(`aria-ref=${ref}`).click();
       expect(await page.title()).toBe("clicked");
+    },
+  );
+
+  it(
+    "captures console output and evaluates expressions",
+    { timeout: 30_000 },
+    async () => {
+      const page = await session.getPage();
+      await page.goto(
+        "data:text/html,<script>console.log('hello from page')</script>",
+      );
+      await page.waitForTimeout(100);
+      expect(
+        session.consoleLog.some((e) => e.text.includes("hello from page")),
+      ).toBe(true);
+      expect(await page.evaluate("1 + 1")).toBe(2);
     },
   );
 

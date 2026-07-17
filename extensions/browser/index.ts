@@ -22,14 +22,22 @@ import {
 import {
   BROWSER_CLICK_DESCRIPTION,
   BROWSER_CLOSE_DESCRIPTION,
+  BROWSER_CONSOLE_DESCRIPTION,
+  BROWSER_EVALUATE_DESCRIPTION,
   BROWSER_GOTO_DESCRIPTION,
   BROWSER_PROMPT_GUIDELINES,
   BROWSER_PROMPT_SNIPPET,
+  BROWSER_REQUESTS_DESCRIPTION,
   BROWSER_SCREENSHOT_DESCRIPTION,
   BROWSER_SNAPSHOT_DESCRIPTION,
   BROWSER_TYPE_DESCRIPTION,
   PARAMETER_DESCRIPTIONS,
 } from "./prompt.ts";
+import {
+  formatConsoleEntries,
+  formatEvaluateResult,
+  formatRequestEntries,
+} from "./src/inspect.ts";
 import { assertNavigable, BrowserSession } from "./src/session.ts";
 import { presentSnapshot } from "./src/snapshot.ts";
 
@@ -207,6 +215,81 @@ export default function browser(pi: ExtensionAPI) {
       };
     },
     // No custom renderResult: pi's default renders the image in-terminal.
+  });
+
+  pi.registerTool({
+    name: "browser_console",
+    label: "Browser Console",
+    description: BROWSER_CONSOLE_DESCRIPTION,
+    parameters: Type.Object({
+      limit: Type.Optional(
+        Type.Number({
+          minimum: 1,
+          maximum: 200,
+          description: PARAMETER_DESCRIPTIONS.consoleLimit,
+        }),
+      ),
+    }),
+    async execute(_id, params) {
+      session.requirePage();
+      const text = formatConsoleEntries(session.consoleLog, params.limit ?? 30);
+      return {
+        content: [{ type: "text" as const, text }],
+        details: { entries: session.consoleLog.length },
+      };
+    },
+    renderResult: compactRender("console: "),
+  });
+
+  pi.registerTool({
+    name: "browser_evaluate",
+    label: "Browser Evaluate",
+    description: BROWSER_EVALUATE_DESCRIPTION,
+    parameters: Type.Object({
+      expression: Type.String({
+        description: PARAMETER_DESCRIPTIONS.expression,
+      }),
+    }),
+    async execute(_id, params) {
+      const page = session.requirePage();
+      const value = await page.evaluate(params.expression);
+      return {
+        content: [{ type: "text" as const, text: formatEvaluateResult(value) }],
+        details: { expression: params.expression.slice(0, 200) },
+      };
+    },
+    renderResult: compactRender("= "),
+  });
+
+  pi.registerTool({
+    name: "browser_requests",
+    label: "Browser Requests",
+    description: BROWSER_REQUESTS_DESCRIPTION,
+    parameters: Type.Object({
+      filter: Type.Optional(
+        Type.String({ description: PARAMETER_DESCRIPTIONS.requestsFilter }),
+      ),
+      limit: Type.Optional(
+        Type.Number({
+          minimum: 1,
+          maximum: 200,
+          description: PARAMETER_DESCRIPTIONS.requestsLimit,
+        }),
+      ),
+    }),
+    async execute(_id, params) {
+      session.requirePage();
+      const text = formatRequestEntries(
+        session.requestLog,
+        params.limit ?? 40,
+        params.filter,
+      );
+      return {
+        content: [{ type: "text" as const, text }],
+        details: { entries: session.requestLog.length, filter: params.filter },
+      };
+    },
+    renderResult: compactRender("net: "),
   });
 
   pi.registerTool({
