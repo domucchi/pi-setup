@@ -43,5 +43,9 @@ See [SETUP.md](./SETUP.md). Short version: run `./install.sh`.
 
 ## Design
 
-`PLAN.md` records the decisions and pattern library; each larger
-extension has its own `DESIGN.md`.
+`PLAN.md` records the decisions and pattern library; each larger extension has
+its own `DESIGN.md`.
+
+## License
+
+[MIT](./LICENSE)
