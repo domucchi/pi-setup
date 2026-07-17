@@ -2,9 +2,30 @@
 
 ## State (2026-07-17)
 
-Functionally complete harness (8 hand-written extensions + MCP via
-pi-mcp-adapter) with the full UI pass DONE. 172 vitest tests, tsc clean.
+Functionally complete harness (9 hand-written extensions + MCP via
+pi-mcp-adapter) with the full UI pass DONE. 174 vitest tests, tsc clean.
 See `PLAN.md` for architecture/decisions; `README.md`/`SETUP.md` for the map.
+
+### Round 2 additions (same day)
+
+- Minimal Claude-style header: 4-row pixel π mascot (gradient), name/
+  version/tagline/cwd; no box, no model line (headers freeze into
+  scrollback — never show session-mutable info there).
+- Themes: github-dark (default) + github-dark-pink; rose-pine deleted.
+- "Thinking level: X" chat status swallowed pre-render (container
+  addChild wrap in ui-customization — post-hoc removal flickers).
+- session-title extension (9th): first real prompt → gpt-5.6-luna names
+  the session via sessionManager.appendSessionInfo (native: /resume label
+  + title), then the tab is overridden to the bare topic.
+- Compact tool results (shared/compact-result.ts): fd/rg/web_search/
+  web_fetch collapse to dim one-liners; ctrl+o expands. Display-only.
+- background-terminals matches the others: /ps overlay dashboard (live
+  tails auto-follow, x kills) + per-state widget counts + /ps demo.
+- Widget strips: aligned muted label column (agents/terminals/workflows),
+  unified ◆ running glyph, /command in accent.
+- Working timer: loader ticks "Working... Ns"; on settle a "worked-for"
+  custom entry renders "✓ worked for Ns" (entries never enter model
+  context).
 
 ### Shipped UI (this round)
 
@@ -53,7 +74,7 @@ See `PLAN.md` for architecture/decisions; `README.md`/`SETUP.md` for the map.
 
 ### User-local settings NOT in the repo (`~/.pi/agent/settings.json`)
 
-`theme: "rose-pine"`, `editorPaddingX: 2`, `outputPad: 1`. Documented in
+`theme: "github-dark"`, `editorPaddingX: 2`, `outputPad: 1`. Documented in
 SETUP.md.
 
 ## Deferred backlog (PLAN.md / DESIGN.md)

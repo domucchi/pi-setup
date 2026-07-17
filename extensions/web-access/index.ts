@@ -9,6 +9,11 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import {
+  previewOf,
+  renderCompactResult,
+  resultText,
+} from "../shared/compact-result.ts";
 import { readEnvValue } from "../shared/env.ts";
 import {
   buildFetchResult,
@@ -63,6 +68,22 @@ export default function webAccess(pi: ExtensionAPI) {
         details: { query: params.query, count: outcome.results.length },
       };
     },
+    // Result blocks matter to the model; the human gets count + titles.
+    renderResult(result, options, theme) {
+      const details = result.details as { query?: string; count?: number } | undefined;
+      const count = details?.count ?? 0;
+      const text = resultText(result);
+      return renderCompactResult({
+        theme,
+        expanded: options.expanded,
+        summary:
+          count === 0
+            ? `no results · ${details?.query ?? ""}`
+            : `→ ${count} result${count === 1 ? "" : "s"} · ${details?.query ?? ""}`,
+        fullText: text,
+        previewLines: count > 0 ? previewOf(text, 3, 1) : undefined,
+      });
+    },
   });
 
   pi.registerTool({
@@ -80,6 +101,19 @@ export default function webAccess(pi: ExtensionAPI) {
         content: [{ type: "text" as const, text: buildFetchResult(result) }],
         details: { url: result.url, ok: result.ok },
       };
+    },
+    // A fetched page is pure model food — the human gets one status line.
+    renderResult(result, options, theme) {
+      const details = result.details as { url?: string; ok?: boolean } | undefined;
+      const text = resultText(result);
+      const chars = text.length;
+      return renderCompactResult({
+        theme,
+        expanded: options.expanded,
+        isError: details?.ok === false,
+        summary: `→ fetched ${details?.url ?? ""} · ${chars > 1_000 ? `${Math.round(chars / 1_000)}k` : chars} chars`,
+        fullText: text,
+      });
     },
   });
 }

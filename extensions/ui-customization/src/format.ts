@@ -1,13 +1,15 @@
 /** Pure formatting for the footer + header (no pi/tui deps, unit-tested). */
 
-/** Block "PI" logo (matches the Claude design). */
-export const PI_LOGO = [
-  "██████╗ ██╗",
-  "██╔══██╗██║",
-  "██████╔╝██║",
-  "██╔═══╝ ██║",
-  "██║     ██║",
-  "╚═╝     ╚═╝",
+/**
+ * Small pixel π creature (Claude Code-mascot-sized): crossbar with two
+ * eye gaps, legs with flared feet. Spaces stay transparent — the eyes
+ * are the terminal background showing through.
+ */
+export const PI_MASCOT = [
+  "▄████████▄",
+  "██ ████ ██",
+  "  ██   ██ ",
+  " ▄██   ██▄",
 ];
 
 export function formatCost(cost: number): string {

@@ -4,7 +4,7 @@ import {
   formatCost,
   formatModel,
   formatTokensShort,
-  PI_LOGO,
+  PI_MASCOT,
 } from "./src/format.ts";
 
 describe("formatCost", () => {
@@ -42,10 +42,10 @@ describe("formatModel", () => {
   });
 });
 
-describe("PI_LOGO", () => {
-  it("is a 6-row block of equal width", () => {
-    expect(PI_LOGO).toHaveLength(6);
-    const widths = new Set(PI_LOGO.map((l) => [...l].length));
+describe("PI_MASCOT", () => {
+  it("is a 4-row block of equal width", () => {
+    expect(PI_MASCOT).toHaveLength(4);
+    const widths = new Set(PI_MASCOT.map((l) => [...l].length));
     expect(widths.size).toBe(1);
   });
 });

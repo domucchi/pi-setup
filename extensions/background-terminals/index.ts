@@ -15,7 +15,9 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { liveDetailView } from "../shared/live-detail.ts";
+import type { OverlayTheme } from "../shared/overlay.ts";
+import { showTerminalsDashboard } from "./dashboard.ts";
+import { createDemoTerminals, demoTerminalsHost } from "./src/demo.ts";
 import {
   BG_KILL_DESCRIPTION,
   BG_LIST_DESCRIPTION,
@@ -26,13 +28,10 @@ import {
   BG_STATUS_DESCRIPTION,
   buildCompletionMessage,
   buildListResult,
-  buildPsDetailLines,
-  buildPsLabel,
   buildStartResult,
   buildStatusResult,
   describeOutcome,
 } from "./prompt.ts";
-import { livePicker } from "../shared/live-picker.ts";
 import {
   TerminalManager,
   type TerminalEntry,
@@ -50,22 +49,94 @@ interface CompletionDetails {
 
 export default function backgroundTerminals(pi: ExtensionAPI) {
   let currentCtx: ExtensionContext | undefined;
-  let lastWidgetCount = 0;
   /** Settled-but-unannounced terminals, keyed by id. */
   const pendingResults = new Map<string, TerminalEntry>();
   /** Ids whose settle is already reported through a tool result. */
   const consumed = new Set<string>();
 
-  const updateWidget = (count: number) => {
-    if (!currentCtx || count === lastWidgetCount) return;
-    lastWidgetCount = count;
+  // ---- Indicator UNDER the input (matching subagents/workflows):
+  // per-state counts; settled terminals linger for a minute, then drop
+  // (they stay in /ps). Killed ones are excluded — the user knows.
+  const WIDGET_LINGER_MS = 60_000;
+  const WIDGET_TICK_MS = 5_000;
+  let widgetVisible = false;
+  let widgetTimer: ReturnType<typeof setInterval> | undefined;
+  let nudgeWidget: (() => void) | undefined;
+
+  interface WidgetCounts {
+    running: number;
+    done: number;
+    failed: number;
+  }
+
+  // The muted label column (aligned across the agents/terminals/workflows
+  // widgets) is what tells the three strips apart at a glance.
+  const widgetLine = (theme: OverlayTheme, counts: WidgetCounts) => {
+    const parts: string[] = [];
+    if (counts.running > 0) {
+      parts.push(theme.fg("warning", `◆ ${counts.running} running`));
+    }
+    if (counts.done > 0) parts.push(theme.fg("success", `✓ ${counts.done} done`));
+    if (counts.failed > 0) {
+      parts.push(theme.fg("error", `✗ ${counts.failed} failed`));
+    }
+    parts.push(theme.fg("accent", "/ps") + theme.fg("dim", " to manage"));
+    return [
+      ` ${theme.fg("muted", "terminals".padEnd(10))} ${parts.join(theme.fg("dim", " · "))}`,
+    ];
+  };
+
+  const widgetCounts = (): WidgetCounts => {
+    const now = Date.now();
+    const counts: WidgetCounts = { running: 0, done: 0, failed: 0 };
+    for (const entry of manager.list()) {
+      if (entry.status === "running") counts.running += 1;
+      else if (
+        entry.status !== "killed" &&
+        entry.settledAt !== null &&
+        now - entry.settledAt <= WIDGET_LINGER_MS
+      ) {
+        if (entry.status === "failed") counts.failed += 1;
+        else counts.done += 1;
+      }
+    }
+    return counts;
+  };
+
+  // Set ONCE per visible spell (render() pulls live counts); re-setting
+  // on each change would reorder widgets. Ticker expires lingerers.
+  const updateWidget = () => {
+    if (!currentCtx) return;
+    const counts = widgetCounts();
+    const visible = counts.running + counts.done + counts.failed > 0;
+    if (!visible) {
+      if (widgetVisible) currentCtx.ui.setWidget("background-terminals", undefined);
+      widgetVisible = false;
+      nudgeWidget = undefined;
+      if (widgetTimer) {
+        clearInterval(widgetTimer);
+        widgetTimer = undefined;
+      }
+      return;
+    }
+    if (!widgetTimer) {
+      widgetTimer = setInterval(() => {
+        updateWidget();
+        nudgeWidget?.();
+      }, WIDGET_TICK_MS);
+    }
+    if (widgetVisible) return;
+    widgetVisible = true;
     currentCtx.ui.setWidget(
       "background-terminals",
-      count > 0
-        ? [
-            ` ● ${count} background terminal${count === 1 ? "" : "s"} running · /ps to inspect`,
-          ]
-        : undefined,
+      (tui, theme) => {
+        nudgeWidget = () => tui.requestRender();
+        return {
+          invalidate() {},
+          render: () => widgetLine(theme, widgetCounts()),
+        };
+      },
+      { placement: "belowEditor" },
     );
   };
 
@@ -114,6 +185,12 @@ export default function backgroundTerminals(pi: ExtensionAPI) {
   pi.on("session_shutdown", () => {
     currentCtx = undefined;
     pendingResults.clear();
+    if (widgetTimer) {
+      clearInterval(widgetTimer);
+      widgetTimer = undefined;
+    }
+    widgetVisible = false;
+    nudgeWidget = undefined;
     manager.disposeAll();
   });
 
@@ -228,26 +305,48 @@ export default function backgroundTerminals(pi: ExtensionAPI) {
     },
   });
 
-  pi.registerCommand("ps", {
-    description: "Inspect background terminals",
-    handler: async (_args, ctx) => {
-      // Loop: picker → detail → back to picker, until Esc on the picker.
-      for (;;) {
-        if (manager.list().length === 0) {
-          ctx.ui.notify("No background terminals", "info");
-          return;
-        }
-        const picked = await livePicker(ctx, "Background terminals:", () =>
-          manager.list().map(buildPsLabel),
-        );
-        if (picked === undefined) return;
-        const entry = manager.list()[picked];
-        if (!entry) return;
+  let demoWidgetTimer: ReturnType<typeof setTimeout> | undefined;
 
-        await liveDetailView(ctx, () =>
-          buildPsDetailLines(manager.get(entry.id) ?? entry),
+  pi.registerCommand("ps", {
+    description: "Inspect background terminals (`/ps demo` previews the UI)",
+    handler: async (args, ctx) => {
+      if (args?.trim() === "demo") {
+        // Fixture-backed preview: same dashboard + widget code paths, no
+        // real processes. The widget lingers so it can be seen under the
+        // input after the overlay closes.
+        if (demoWidgetTimer) clearTimeout(demoWidgetTimer);
+        ctx.ui.setWidget(
+          "background-terminals-demo",
+          (_tui, theme) => ({
+            invalidate() {},
+            render: () => widgetLine(theme, { running: 1, done: 1, failed: 1 }),
+          }),
+          { placement: "belowEditor" },
         );
+        try {
+          await showTerminalsDashboard(
+            ctx,
+            demoTerminalsHost(createDemoTerminals(Date.now())),
+          );
+        } finally {
+          ctx.ui.notify("demo widget below the input clears in 20s", "info");
+          demoWidgetTimer = setTimeout(
+            () => currentCtx?.ui.setWidget("background-terminals-demo", undefined),
+            20_000,
+          );
+        }
+        return;
       }
+      await showTerminalsDashboard(ctx, {
+        list: () => manager.list(),
+        kill: (id) => {
+          // Mirror bg_kill: a terminal the user kills by hand should not
+          // be re-announced as a completion follow-up.
+          consumed.add(id);
+          pendingResults.delete(id);
+          void manager.kill([id]).catch(() => {});
+        },
+      });
     },
   });
 }

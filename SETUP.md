@@ -66,10 +66,11 @@ dependency.
 ## Themes
 
 Themes live in `themes/*.json` (symlinked into `~/.pi/agent/themes`). Included:
-`rose-pine` (pink, default) and `catppuccin-mocha` (pastel). pi also ships
+`github-dark` (GitHub Dark / Primer palette, the default), `github-dark-pink`
+(same chrome, pink accents), and `catppuccin-mocha` (pastel). pi also ships
 `dark` and `light`. Switch any time via `/settings` in the TUI, or set
 `"theme": "<name>"` in `~/.pi/agent/settings.json`. Add a theme by dropping
-another JSON in `themes/` (all 51 `colors` keys required — see the schema in
+another JSON in `themes/` (all 52 `colors` keys required — see the schema in
 each file's `$schema`).
 
 ## Development

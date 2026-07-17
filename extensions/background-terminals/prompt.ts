@@ -104,45 +104,11 @@ export function buildListResult(entries: TerminalEntry[]) {
     .join("\n");
 }
 
-function truncateMiddleless(text: string, maxChars: number) {
-  const flat = text.replace(/\s+/g, " ").trim();
-  return flat.length <= maxChars ? flat : `${flat.slice(0, maxChars - 1)}…`;
-}
-
-function lastLines(text: string, count: number) {
+/** Trailing non-empty lines of a stream (used by the /ps dashboard). */
+export function lastLines(text: string, count: number) {
   const lines = text.split("\n");
   while (lines.length > 0 && lines.at(-1) === "") lines.pop();
   return lines.slice(-count);
-}
-
-/** One picker row: id, state, runtime, title, and the actual command. */
-export function buildPsLabel(entry: TerminalEntry) {
-  const state =
-    entry.status === "running" ? "●" : entry.status === "done" ? "✓" : "✗";
-  return `${entry.id} ${state} ${describeOutcome(entry)} ${describeDuration(entry.startedAt, entry.settledAt)} · ${entry.title} · $ ${truncateMiddleless(entry.command, 48)}`;
-}
-
-/** Plain-text detail view body for /ps (styling applied by the caller). */
-export function buildPsDetailLines(entry: TerminalEntry) {
-  const lines = [
-    `${entry.id} "${entry.title}" — ${describeOutcome(entry)} after ${describeDuration(entry.startedAt, entry.settledAt)}`,
-    `$ ${entry.command}`,
-    `cwd: ${entry.cwd}`,
-    "",
-  ];
-  const stdout = lastLines(entry.stdout.text(), 15);
-  lines.push(`stdout (last ${stdout.length} lines):`);
-  lines.push(...(stdout.length > 0 ? stdout.map((l) => `  ${l}`) : ["  (empty)"]));
-  const stderr = lastLines(entry.stderr.text(), 5);
-  if (stderr.length > 0) {
-    lines.push("", `stderr (last ${stderr.length} lines):`);
-    lines.push(...stderr.map((l) => `  ${l}`));
-  }
-  if (entry.spill) {
-    lines.push("", `logs: ${entry.spill.stdoutPath}`);
-    lines.push(`      ${entry.spill.stderrPath}`);
-  }
-  return lines;
 }
 
 /** Follow-up message injected into the session when a terminal exits unnoticed. */

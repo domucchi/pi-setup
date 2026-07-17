@@ -16,23 +16,24 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import {
+  Text,
   truncateToWidth,
   visibleWidth,
   type Component,
+  type TUI,
 } from "@earendil-works/pi-tui";
+import { formatDuration } from "../shared/agent-format.ts";
 import { runCommand } from "../shared/process.ts";
-import { roundedBox } from "./src/box.ts";
 import { gradientLogo } from "./src/gradient.ts";
 import {
   formatContext,
   formatCost,
   formatModel,
-  PI_LOGO,
+  PI_MASCOT,
 } from "./src/format.ts";
 
 const MARGIN = 1; // left/right gutter, matches outputPad
 const TAGLINE = "agentic coding, in your terminal";
-const SUBTAGLINE = "ask pi to explain its features or look up its own docs";
 
 function formatDirectory(cwd: string): string {
   const home = homedir();
@@ -65,10 +66,70 @@ function sessionCost(ctx: ExtensionContext): number {
   return cost;
 }
 
+const ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
+
 export default function uiCustomization(pi: ExtensionAPI) {
   let requestRender: (() => void) | undefined;
+  let tuiRef: TUI | undefined;
   let version = ""; // resolved async from `pi --version`
   let stickyBottom = true;
+
+  // ---- Suppress the "Thinking level: X" chat status. pi appends it to
+  // the chat on every cycle, but the level is already live in our footer;
+  // in the chat it just piles up in scrollback. There is no core off
+  // switch, and removing it after the fact flickers (it survives a
+  // frame), so we wrap each container's addChild and swallow the status
+  // BEFORE it ever renders — plus the blank spacer added just before it.
+  const FILTER_FLAG = "__piThinkingStatusFilter";
+  const isBlank = (component: Component | undefined) => {
+    const lines = component?.render?.(10);
+    return (
+      Array.isArray(lines) &&
+      lines.every((l) => l.replace(ANSI_PATTERN, "").trim() === "")
+    );
+  };
+  const installStatusFilter = () => {
+    const tui = tuiRef;
+    if (!tui) return;
+    try {
+      for (const child of tui.children) {
+        const container = child as unknown as {
+          children?: Component[];
+          addChild?: ((c: Component) => void) & { [FILTER_FLAG]?: boolean };
+          removeChild?: (c: Component) => void;
+        };
+        if (
+          !Array.isArray(container.children) ||
+          typeof container.addChild !== "function" ||
+          typeof container.removeChild !== "function" ||
+          container.addChild[FILTER_FLAG]
+        ) {
+          continue;
+        }
+        const original = container.addChild.bind(container);
+        const wrapped = ((component: Component) => {
+          try {
+            const lines = component?.render?.(120);
+            if (Array.isArray(lines)) {
+              const text = lines.join("\n").replace(ANSI_PATTERN, "").trim();
+              if (/^Thinking level: \S+$/.test(text)) {
+                const last = container.children!.at(-1);
+                if (last && isBlank(last)) container.removeChild!(last);
+                return;
+              }
+            }
+          } catch {
+            // On any doubt, fall through to the normal add.
+          }
+          original(component);
+        }) as ((c: Component) => void) & { [FILTER_FLAG]?: boolean };
+        wrapped[FILTER_FLAG] = true;
+        container.addChild = wrapped;
+      }
+    } catch {
+      // Cosmetic filtering only — never break on pi internals shifting.
+    }
+  };
 
   // ---- Sticky input: pad the buffer so the editor hugs the terminal
   // bottom. pi-tui renders one linear buffer and shows its tail; on a
@@ -136,54 +197,41 @@ export default function uiCustomization(pi: ExtensionAPI) {
     if (ctx.mode !== "tui") return;
     installSticky(ctx);
 
-    // ---- Header: bordered box with logo + version + folder + model ----
+    // ---- Header: minimal, Claude Code-style — small gradient mascot
+    // beside name/version, tagline, cwd. No box, and deliberately NO
+    // model line: the header freezes into scrollback, so anything that
+    // can change mid-session (model, thinking) would go stale there.
     ctx.ui.setHeader((tui, theme) => {
       requestRender = () => tui.requestRender();
+      tuiRef = tui;
       return {
         invalidate() {},
         render(width: number) {
-          const boxWidth = Math.max(24, width - MARGIN * 2);
-          const model = ctx.model;
-          const dir = formatDirectory(ctx.cwd);
-
-          // Info column beside the logo.
           const info = [
-            `${theme.fg("text", theme.bold("pi"))}  ${theme.fg("muted", TAGLINE)}`,
-            theme.fg("dim", SUBTAGLINE),
-            "",
-            theme.fg("muted", dir),
-            theme.fg("dim", formatModel(model?.provider, model?.id)),
+            theme.fg("text", theme.bold("pi")) +
+              (version ? theme.fg("dim", ` v${version}`) : ""),
+            theme.fg("muted", TAGLINE),
+            theme.fg("dim", formatDirectory(ctx.cwd)),
           ];
 
-          // Themed gradient logo (accent → borderAccent), flat fallback.
+          // Themed gradient mascot (accent → borderAccent), flat fallback.
           const logo = gradientLogo(
-            PI_LOGO,
+            PI_MASCOT,
             theme.getFgAnsi("accent"),
             theme.getFgAnsi("borderAccent"),
             theme.getColorMode() === "truecolor",
             (line) => theme.fg("accent", line),
           );
 
-          // Zip the logo with the info column (info vertically centered).
-          const offset = Math.max(0, Math.floor((PI_LOGO.length - info.length) / 2));
-          const lines: string[] = [];
-          for (let i = 0; i < PI_LOGO.length; i++) {
-            const side = info[i - offset] ?? "";
-            lines.push(`${logo[i]}     ${side}`);
-          }
-          const title = version ? `pi ${version}` : "pi";
-          const boxed = roundedBox(
-            title,
-            lines,
-            boxWidth,
-            {
-              border: (s) => theme.fg("border", s),
-              title: (s) => theme.fg("accent", s),
-            },
-            3,
-          );
           const pad = " ".repeat(MARGIN);
-          return ["", ...boxed.map((l) => pad + l), ""];
+          const lines: string[] = [];
+          for (let i = 0; i < PI_MASCOT.length; i++) {
+            const side = info[i] ?? "";
+            lines.push(
+              truncateToWidth(`${pad}${logo[i]}   ${side}`, width),
+            );
+          }
+          return ["", ...lines, ""];
         },
       };
     });
@@ -204,7 +252,7 @@ export default function uiCustomization(pi: ExtensionAPI) {
           const thinking = model?.reasoning ? pi.getThinkingLevel() : "off";
 
           const left =
-            theme.fg("dim", formatModel(model?.provider, model?.id)) +
+            theme.fg("dim", model?.name + " (" + formatModel(model?.provider, model?.id) + ")") +
             " " +
             theme.fg("muted", thinking);
           const right =
@@ -223,8 +271,59 @@ export default function uiCustomization(pi: ExtensionAPI) {
       };
     });
 
-    ctx.ui.setTitle("pi");
+    // Terminal title is owned by pi core ("π - {session name} - {folder}");
+    // the session-title extension names sessions via appendSessionInfo.
+    // setHeader above captured tuiRef synchronously; safe to patch now.
+    installStatusFilter();
   };
+
+  // ---- Working timer: the built-in loader says just "Working..." —
+  // tick the elapsed time into it, and when the run settles leave a
+  // small dim line with the total. The line is a custom ENTRY (not a
+  // message), so it renders in the chat and persists in the session
+  // without ever entering the model's context.
+  const WORK_ENTRY_TYPE = "worked-for";
+  let workStartedAt: number | undefined;
+  let workTicker: ReturnType<typeof setInterval> | undefined;
+
+  pi.registerEntryRenderer<{ ms: number }>(WORK_ENTRY_TYPE, (entry, _options, theme) => {
+    return new Text(
+      theme.fg("success", "✓ ") +
+        theme.fg("dim", `worked for ${formatDuration(entry.data?.ms ?? 0)}`),
+      1,
+      0,
+    );
+  });
+
+  const stopWorkTicker = () => {
+    if (workTicker) clearInterval(workTicker);
+    workTicker = undefined;
+  };
+
+  pi.on("agent_start", (_event, ctx) => {
+    if (ctx.mode !== "tui") return;
+    workStartedAt = Date.now();
+    const update = () => {
+      if (workStartedAt === undefined) return;
+      ctx.ui.setWorkingMessage(
+        `Working... ${formatDuration(Date.now() - workStartedAt)} · esc to interrupt`,
+      );
+    };
+    update();
+    stopWorkTicker();
+    workTicker = setInterval(update, 1_000);
+    workTicker.unref?.();
+  });
+
+  pi.on("agent_settled", (_event, ctx) => {
+    if (workStartedAt === undefined) return;
+    const ms = Date.now() - workStartedAt;
+    workStartedAt = undefined;
+    stopWorkTicker();
+    if (ctx.mode !== "tui") return;
+    ctx.ui.setWorkingMessage();
+    pi.appendEntry(WORK_ENTRY_TYPE, { ms });
+  });
 
   pi.registerCommand("sticky", {
     description: "Toggle the input sticking to the terminal bottom",
@@ -258,6 +357,9 @@ export default function uiCustomization(pi: ExtensionAPI) {
 
   pi.on("session_shutdown", (_event, ctx) => {
     requestRender = undefined;
+    tuiRef = undefined;
+    workStartedAt = undefined;
+    stopWorkTicker();
     if (ctx.mode === "tui") {
       ctx.ui.setHeader(undefined);
       ctx.ui.setFooter(undefined);

@@ -11,6 +11,11 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import {
+  previewOf,
+  renderCompactResult,
+  resultText,
+} from "../shared/compact-result.ts";
 import { runCommand } from "../shared/process.ts";
 import {
   FD_DESCRIPTION,
@@ -142,6 +147,17 @@ export default function fileSearch(pi: ExtensionAPI) {
         details: { matches },
       };
     },
+    // The full path list matters to the model, not the human: collapse to
+    // a count (ctrl+o expands).
+    renderResult(result, options, theme) {
+      const matches = (result.details as { matches?: number } | undefined)?.matches ?? 0;
+      return renderCompactResult({
+        theme,
+        expanded: options.expanded,
+        summary: matches === 0 ? "no matches" : `→ ${matches} file${matches === 1 ? "" : "s"}`,
+        fullText: resultText(result),
+      });
+    },
   });
 
   pi.registerTool({
@@ -202,6 +218,21 @@ export default function fileSearch(pi: ExtensionAPI) {
         content: [{ type: "text" as const, text }],
         details: { matches },
       };
+    },
+    // Collapse the match dump to a count + a taste of the hits.
+    renderResult(result, options, theme) {
+      const matches = (result.details as { matches?: number } | undefined)?.matches ?? 0;
+      const text = resultText(result);
+      return renderCompactResult({
+        theme,
+        expanded: options.expanded,
+        summary:
+          matches === 0
+            ? "no matches"
+            : `→ ${matches} matching line${matches === 1 ? "" : "s"}`,
+        fullText: text,
+        previewLines: matches > 0 ? previewOf(text, 3) : undefined,
+      });
     },
   });
 }

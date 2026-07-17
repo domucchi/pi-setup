@@ -108,6 +108,8 @@ export default function workflows(pi: ExtensionAPI) {
   }
 
   // One line builder for the real widget and the /workflows demo one.
+  // The muted label column (aligned across the agents/terminals/workflows
+  // widgets) is what tells the three strips apart at a glance.
   const widgetLines = (theme: OverlayTheme, runs: WidgetRun[]) =>
     runs.map((run) => {
       const parts = [theme.fg("accent", "▸ ") + theme.fg("text", run.name)];
@@ -126,8 +128,8 @@ export default function workflows(pi: ExtensionAPI) {
           theme.fg(statusColorKey(run.status), `${icon} ${statusWord(run.status)}`),
         );
       }
-      parts.push(theme.fg("dim", "/workflows to manage"));
-      return ` ${parts.join(theme.fg("dim", " · "))}`;
+      parts.push(theme.fg("accent", "/workflows") + theme.fg("dim", " to manage"));
+      return ` ${theme.fg("muted", "workflows".padEnd(10))} ${parts.join(theme.fg("dim", " · "))}`;
     });
 
   const widgetRuns = (): WidgetRun[] => {

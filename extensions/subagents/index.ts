@@ -78,6 +78,8 @@ export default function subagents(pi: ExtensionAPI) {
   }
 
   // One line builder for the real widget and the /subagents demo one.
+  // The muted label column (aligned across the agents/terminals/workflows
+  // widgets) is what tells the three strips apart at a glance.
   const widgetLine = (theme: OverlayTheme, counts: WidgetCounts) => {
     const parts: string[] = [];
     if (counts.running > 0) {
@@ -89,8 +91,10 @@ export default function subagents(pi: ExtensionAPI) {
     if (counts.failed > 0) {
       parts.push(theme.fg("error", `✗ ${counts.failed} failed`));
     }
-    parts.push(theme.fg("dim", "/subagents to manage"));
-    return [` ${parts.join(theme.fg("dim", " · "))}`];
+    parts.push(theme.fg("accent", "/subagents") + theme.fg("dim", " to manage"));
+    return [
+      ` ${theme.fg("muted", "agents".padEnd(10))} ${parts.join(theme.fg("dim", " · "))}`,
+    ];
   };
 
   const widgetCounts = (): WidgetCounts => {
