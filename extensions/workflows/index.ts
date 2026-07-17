@@ -633,7 +633,10 @@ export default function workflows(pi: ExtensionAPI) {
           sortRunningFirst(
             [...activeRuns.values()],
             (run) => run.record.status === "running",
-            (run) => run.record.startedAt,
+            (run) =>
+              run.record.status === "running"
+                ? run.record.startedAt
+                : (run.record.settledAt ?? run.record.startedAt),
           ).map(toView),
         stop: (runId) => activeRuns.get(runId)?.abort.abort(),
       });

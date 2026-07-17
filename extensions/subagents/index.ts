@@ -504,7 +504,7 @@ export default function subagents(pi: ExtensionAPI) {
           sortRunningFirst(
             manager.list(),
             (s) => s.status === "working",
-            (s) => s.startedAt,
+            (s) => (s.status === "working" ? s.startedAt : (s.settledAt ?? s.startedAt)),
           ),
         transcriptTail: (id, lines) => manager.transcriptTail(id, lines),
         cancel: (id) => {

@@ -96,7 +96,7 @@ describe("sortRunningFirst", () => {
     id,
   });
 
-  it("puts running first, then most-recent within each group", () => {
+  it("puts running first, then by the recency key within each group", () => {
     const items = [
       item(false, 30, "done-new"),
       item(true, 10, "run-old"),
@@ -114,6 +114,21 @@ describe("sortRunningFirst", () => {
       "done-new",
       "done-old",
     ]);
+  });
+
+  it("orders the settled group by finish time via the recency key", () => {
+    // Started old but finished newest → tops the settled block.
+    const items = [
+      { id: "a", running: false, startedAt: 100, settledAt: 110 },
+      { id: "b", running: false, startedAt: 1, settledAt: 900 },
+      { id: "c", running: true, startedAt: 50, settledAt: 0 },
+    ];
+    const sorted = sortRunningFirst(
+      items,
+      (i) => i.running,
+      (i) => (i.running ? i.startedAt : i.settledAt),
+    );
+    expect(sorted.map((i) => i.id)).toEqual(["c", "b", "a"]);
   });
 
   it("does not mutate the input", () => {

@@ -353,7 +353,7 @@ export default function backgroundTerminals(pi: ExtensionAPI) {
           sortRunningFirst(
             manager.list(),
             (e) => e.status === "running",
-            (e) => e.startedAt,
+            (e) => (e.status === "running" ? e.startedAt : (e.settledAt ?? e.startedAt)),
           ),
         kill: (id) => {
           // Mirror bg_kill: a terminal the user kills by hand should not

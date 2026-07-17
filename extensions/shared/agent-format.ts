@@ -66,18 +66,21 @@ export function windowSlice<T>(
 
 /**
  * Stable sort putting running items first, each group ordered by
- * startedAt descending (most recent first). Running work is what the
- * user acts on, so it belongs at the top of every agent/run list.
+ * `recency` descending. Callers pass the timestamp that means "most
+ * relevant" per item — typically startedAt for running work and
+ * settledAt for finished work, so the newest-finished sits atop the
+ * settled block. Running work is what the user acts on, so it belongs
+ * at the top of every agent/run list.
  */
 export function sortRunningFirst<T>(
   items: T[],
   isRunning: (item: T) => boolean,
-  startedAt: (item: T) => number,
+  recency: (item: T) => number,
 ): T[] {
   return [...items].sort((a, b) => {
     const ar = isRunning(a) ? 1 : 0;
     const br = isRunning(b) ? 1 : 0;
     if (ar !== br) return br - ar; // running group first
-    return startedAt(b) - startedAt(a); // then most recent
+    return recency(b) - recency(a); // then most recent
   });
 }
