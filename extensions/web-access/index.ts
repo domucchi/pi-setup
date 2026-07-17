@@ -50,10 +50,11 @@ export default function webAccess(pi: ExtensionAPI) {
         Type.Boolean({ description: PARAMETER_DESCRIPTIONS.includeText }),
       ),
     }),
-    async execute(_id, params) {
+    async execute(_id, params, signal) {
       const outcome = await exaSearch(params.query, readEnvValue("EXA_API_KEY"), {
         numResults: params.num_results,
         includeText: params.include_text,
+        signal,
       });
       if (!outcome.ok) {
         throw new Error(searchErrorMessage(outcome.error));
@@ -95,8 +96,8 @@ export default function webAccess(pi: ExtensionAPI) {
     parameters: Type.Object({
       url: Type.String({ description: PARAMETER_DESCRIPTIONS.url }),
     }),
-    async execute(_id, params) {
-      const result = await fetchUrl(params.url);
+    async execute(_id, params, signal) {
+      const result = await fetchUrl(params.url, { signal });
       return {
         content: [{ type: "text" as const, text: buildFetchResult(result) }],
         details: { url: result.url, ok: result.ok },

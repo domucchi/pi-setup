@@ -12,6 +12,17 @@ describe("buildFdArgs", () => {
     ]);
   });
 
+  it("uses the glob wildcard when pattern is omitted in glob mode", () => {
+    // Regression: fd --glob "." matches nothing (glob, not regex).
+    expect(buildFdArgs({ glob: true })).toEqual([
+      "--color=never",
+      "--glob",
+      "--max-results",
+      "1000",
+      "*",
+    ]);
+  });
+
   it("maps every option", () => {
     expect(
       buildFdArgs({

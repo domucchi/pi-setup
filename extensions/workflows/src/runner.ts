@@ -78,7 +78,7 @@ const REPORT_TOOL_NAME = "report_result";
 
 function buildReportTool(
   schema: unknown,
-  capture: { value?: unknown },
+  capture: { value?: unknown; reported?: boolean },
 ): ToolDefinition {
   return {
     name: REPORT_TOOL_NAME,
@@ -87,6 +87,14 @@ function buildReportTool(
       "Report your final structured result. Call exactly once, as your last action; its arguments ARE your return value.",
     parameters: Type.Unsafe(schema as Record<string, unknown>),
     async execute(_toolCallId, params) {
+      // "Exactly once" is enforced, not just promised — a second call
+      // must not silently overwrite the recorded value.
+      if (capture.reported) {
+        throw new Error(
+          `${REPORT_TOOL_NAME} was already called; the first result stands. Finish your run.`,
+        );
+      }
+      capture.reported = true;
       capture.value = params;
       return {
         content: [{ type: "text" as const, text: "Result recorded." }],
@@ -178,7 +186,7 @@ export function createAgentRunner(options: {
         });
       }
 
-      const capture: { value?: unknown } = {};
+      const capture: { value?: unknown; reported?: boolean } = {};
       const customTools = request.opts.schema
         ? [buildReportTool(request.opts.schema, capture)]
         : undefined;
@@ -262,7 +270,7 @@ export function createAgentRunner(options: {
       const outcome = await settled;
 
       if (outcome.kind === "completed") {
-        if (request.opts.schema && capture.value === undefined) {
+        if (request.opts.schema && !capture.reported) {
           return finalize({
             ok: false,
             output: outcome.finalText,

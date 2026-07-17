@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { assertPublicUrl, isPrivateIp, SsrfError } from "./src/ssrf.ts";
+import {
+  assertPublicUrl,
+  isPrivateIp,
+  parseV6Groups,
+  SsrfError,
+} from "./src/ssrf.ts";
 
 describe("isPrivateIp", () => {
   it("flags loopback, link-local, private, and CGNAT v4", () => {
@@ -27,6 +32,31 @@ describe("isPrivateIp", () => {
       expect(isPrivateIp(ip), ip).toBe(true);
     }
     expect(isPrivateIp("2606:4700:4700::1111")).toBe(false); // public
+  });
+
+  it("flags HEX-form IPv4-mapped v6 (Node's canonicalization)", () => {
+    // Regression: http://[::ffff:127.0.0.1]/ canonicalizes to the hex
+    // form, which the old dotted-only regex let through.
+    for (const ip of [
+      "::ffff:7f00:1", // 127.0.0.1
+      "::ffff:a9fe:a9fe", // 169.254.169.254 (metadata)
+      "::ffff:c0a8:101", // 192.168.1.1
+      "::7f00:1", // deprecated IPv4-compatible 127.0.0.1
+      "64:ff9b::7f00:1", // NAT64 to loopback
+      "64:ff9b::a9fe:a9fe", // NAT64 to metadata
+    ]) {
+      expect(isPrivateIp(ip), ip).toBe(true);
+    }
+    expect(isPrivateIp("::ffff:808:808")).toBe(false); // 8.8.8.8
+    expect(isPrivateIp("64:ff9b::101:101")).toBe(false); // NAT64 to 1.1.1.1
+  });
+
+  it("parses groups and rejects malformed v6", () => {
+    expect(parseV6Groups("::ffff:7f00:1")).toEqual([0, 0, 0, 0, 0, 0xffff, 0x7f00, 1]);
+    expect(parseV6Groups("::ffff:127.0.0.1")).toEqual([0, 0, 0, 0, 0, 0xffff, 0x7f00, 1]);
+    for (const ip of ["::ffff:zz00:1", "1::2::3", "1:2:3:4:5:6:7:8:9", "::300.0.0.1"]) {
+      expect(parseV6Groups(ip), ip).toBeUndefined();
+    }
   });
 });
 

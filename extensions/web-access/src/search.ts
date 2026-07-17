@@ -25,6 +25,8 @@ export type SearchOutcome =
 export interface SearchOptions {
   numResults?: number;
   includeText?: boolean;
+  /** Tool-execution abort: cancels the request when it fires. */
+  signal?: AbortSignal;
 }
 
 const MAX_TEXT_CHARS = 4_000;
@@ -67,6 +69,12 @@ export async function exaSearch(
   const includeText = options.includeText ?? false;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
+  if (options.signal?.aborted) controller.abort();
+  else {
+    options.signal?.addEventListener("abort", () => controller.abort(), {
+      once: true,
+    });
+  }
   try {
     const response = await fetcher(EXA_ENDPOINT, {
       method: "POST",

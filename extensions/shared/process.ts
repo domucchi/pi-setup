@@ -14,6 +14,8 @@ export interface RunCommandOptions {
    * search can't buffer unbounded memory. The captured stdout is kept.
    */
   maxStdoutBytes?: number;
+  /** Tool-execution abort: kills the subprocess when it fires. */
+  signal?: AbortSignal;
 }
 
 function appendFailure(stderr: string, command: string, message: string) {
@@ -44,6 +46,7 @@ export function runCommand(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      options.signal?.removeEventListener("abort", onAbort);
       resolve({ ...result, truncated });
     };
 
@@ -56,6 +59,17 @@ export function runCommand(
       child.kill("SIGKILL");
       settle({ code: -1, stdout, stderr });
     }, timeoutMs);
+
+    // Honor the tool-execution abort: kill the subprocess instead of
+    // letting it run to completion behind an interrupted agent.
+    const onAbort = () => {
+      child.kill("SIGKILL");
+      settle({ code: -1, stdout, stderr: appendFailure(stderr, command, "aborted") });
+    };
+    if (options.signal) {
+      if (options.signal.aborted) onAbort();
+      else options.signal.addEventListener("abort", onAbort, { once: true });
+    }
 
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");

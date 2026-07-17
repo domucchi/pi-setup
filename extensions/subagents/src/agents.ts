@@ -53,8 +53,19 @@ export function parseAgentFile(
     .filter(Boolean);
   const body = match[2].trim();
   const backendField = fields.get("backend");
-  const backend: BackendName =
-    backendField === "claude" || backendField === "codex" ? backendField : "pi";
+  // Default only when ABSENT. A typo ("claud") silently becoming a pi
+  // child would swap tools, model, and permission semantics — reject
+  // the role instead (callers skip nulls and the spawn error lists
+  // available roles).
+  if (
+    backendField !== undefined &&
+    backendField !== "pi" &&
+    backendField !== "claude" &&
+    backendField !== "codex"
+  ) {
+    return null;
+  }
+  const backend: BackendName = (backendField as BackendName) ?? "pi";
 
   return {
     name,

@@ -23,8 +23,9 @@ export function buildFdArgs(params: FdParams) {
     args.push("--max-depth", String(params.max_depth));
   }
   args.push("--max-results", String(params.limit ?? FD_DEFAULT_LIMIT));
-  // fd requires a pattern before a search path; "." matches everything.
-  args.push(params.pattern ?? ".");
+  // fd requires a pattern before a search path. "." matches everything
+  // in regex mode but NOTHING in glob mode — there the wildcard is "*".
+  args.push(params.pattern ?? (params.glob ? "*" : "."));
   if (params.path) args.push(params.path);
   return args;
 }

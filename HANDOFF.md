@@ -3,7 +3,8 @@
 ## State (2026-07-17)
 
 Functionally complete harness (10 hand-written extensions + MCP via
-pi-mcp-adapter) with the full UI pass DONE. 186 vitest tests, tsc clean.
+pi-mcp-adapter) with the full UI pass DONE. 220+ vitest tests, tsc clean
+(run `npm run verify` for the current count — this number drifts).
 See `PLAN.md` for architecture/decisions; `README.md`/`SETUP.md` for the map.
 
 ## Big builds: DONE

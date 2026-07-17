@@ -75,6 +75,9 @@ export default function sessionTitle(pi: ExtensionAPI) {
   });
 
   async function generate(ctx: ExtensionContext, text: string) {
+    // A generation can settle after /new, /resume, or /fork; everything
+    // it would mutate belongs to the session it started in.
+    const startedInSession = session;
     const registry = ctx.modelRegistry;
     const model =
       registry.find(TITLE_MODEL_PROVIDER, TITLE_MODEL_ID) ??
@@ -121,6 +124,7 @@ export default function sessionTitle(pi: ExtensionAPI) {
     });
 
     const outcome = await settled;
+    if (session !== startedInSession) return; // stale — session switched
     if (outcome.kind !== "completed") return;
     const title = sanitizeTitle(outcome.finalText);
     if (!title) return;

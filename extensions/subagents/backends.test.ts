@@ -21,9 +21,13 @@ describe("parseAgentFile backend field", () => {
       "codex",
     );
     expect(parseAgentFile("---\nname: a\n---\n", "x")?.backend).toBe("pi");
-    expect(
-      parseAgentFile("---\nname: a\nbackend: gemini\n---\n", "x")?.backend,
-    ).toBe("pi");
+    expect(parseAgentFile("---\nname: a\nbackend: pi\n---\n", "x")?.backend).toBe(
+      "pi",
+    );
+    // Typos must not silently become pi children (different tools,
+    // model, and permission semantics) — the role is rejected instead.
+    expect(parseAgentFile("---\nname: a\nbackend: claud\n---\n", "x")).toBeNull();
+    expect(parseAgentFile("---\nname: a\nbackend: gemini\n---\n", "x")).toBeNull();
   });
 });
 

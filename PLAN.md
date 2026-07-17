@@ -111,9 +111,10 @@ diagnostics (`pi-lens` is an acceptable install — pure plumbing).
 
 - Effect (any version) — see Decisions.
 - Bun — possible only by launching pi itself under Bun (extensions inherit pi's runtime); rejected because our pi runs under Node and dual-runtime validation buys us nothing.
-- Multi-harness subagent backends (claude/codex) in v1; note the reference's
-  claude backend runs headless `bypassPermissions` — if ever added, decide that
-  deliberately.
+- ~~Multi-harness subagent backends (claude/codex) in v1~~ — BUILT
+  2026-07-17 (extensions/subagents/src/backends/). The bypassPermissions
+  question was decided deliberately: bypass on both (user's call;
+  real isolation is a later sandboxing concern, not permission prompts).
 - Firecrawl — paid API, author preference; choose web access separately.
 - Installing behavior-shaping community packages (subagents/plan/todo/memory).
 

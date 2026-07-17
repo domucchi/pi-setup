@@ -38,7 +38,7 @@ function isTextContentType(contentType: string | null): boolean {
  */
 export async function fetchUrl(
   rawUrl: string,
-  deps: { fetcher?: Fetcher; lookup?: Lookup } = {},
+  deps: { fetcher?: Fetcher; lookup?: Lookup; signal?: AbortSignal } = {},
 ): Promise<FetchResult> {
   const fetcher = deps.fetcher ?? fetch;
 
@@ -51,6 +51,9 @@ export async function fetchUrl(
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  // Tool-execution abort cancels the network work too.
+  if (deps.signal?.aborted) controller.abort();
+  else deps.signal?.addEventListener("abort", () => controller.abort(), { once: true });
   try {
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
       if (current.protocol !== "http:" && current.protocol !== "https:") {

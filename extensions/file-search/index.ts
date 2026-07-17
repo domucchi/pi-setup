@@ -51,11 +51,13 @@ async function runSearch(
   args: string[],
   cwd: string,
   emptyMessage: string,
+  signal?: AbortSignal,
 ) {
   // Bound memory: stop the search once stdout passes the byte budget
   // (rg --max-count is per-file, so a broad pattern can still flood).
   const result = await runCommand(binary, args, cwd, SEARCH_TIMEOUT_MS, {
     maxStdoutBytes: PROCESS_STDOUT_BUDGET,
+    signal,
   });
   if (result.code === -1) {
     throw new Error(`${binary} timed out after ${SEARCH_TIMEOUT_MS / 1000}s. Narrow the search.`);
@@ -135,12 +137,13 @@ export default function fileSearch(pi: ExtensionAPI) {
         }),
       ),
     }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
+    async execute(_id, params, signal, _onUpdate, ctx) {
       const { text, matches } = await runSearch(
         "fd",
         buildFdArgs(params),
         ctx.cwd,
         "No files matched.",
+        signal,
       );
       return {
         content: [{ type: "text" as const, text }],
@@ -207,12 +210,13 @@ export default function fileSearch(pi: ExtensionAPI) {
         }),
       ),
     }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
+    async execute(_id, params, signal, _onUpdate, ctx) {
       const { text, matches } = await runSearch(
         "rg",
         buildRgArgs(params),
         ctx.cwd,
         "No matches.",
+        signal,
       );
       return {
         content: [{ type: "text" as const, text }],

@@ -21,9 +21,11 @@ rather than installed as a package.
 - **web-access** — `web_fetch` (keyless, local HTML→markdown) and
   `web_search` (Exa; set `EXA_API_KEY`).
 - **browser** — a headless chromium as first-class tools
-  (`browser_goto`/`_snapshot`/`_click`/`_type`/`_screenshot`/`_close`)
-  on aria snapshots with `[ref=eN]` element references; screenshots
-  render in the terminal. Built on the playwright library, no MCP.
+  (`browser_goto`/`_snapshot`/`_click`/`_type`/`_screenshot`/`_console`/
+  `_evaluate`/`_requests`/`_close`) on aria snapshots with `[ref=eN]`
+  element references; screenshots render in the terminal. Heavy work
+  (mocking, tracing, auth state) goes through playwright scripts — see
+  the `browser-debugging` skill. Built on the playwright library, no MCP.
 - **todos** — `todo_write` (Claude Code TodoWrite semantics); live
   checklist above the input.
 - **session-title** — a cheap model names each session from its first

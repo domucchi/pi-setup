@@ -4,7 +4,11 @@ import {
   formatEvaluateResult,
   formatRequestEntries,
 } from "./src/inspect.ts";
-import { assertNavigable, BrowserSession } from "./src/session.ts";
+import {
+  assertNavigable,
+  BrowserSession,
+  isMetadataHost,
+} from "./src/session.ts";
 import { capSnapshot, presentSnapshot } from "./src/snapshot.ts";
 
 describe("assertNavigable", () => {
@@ -16,13 +20,26 @@ describe("assertNavigable", () => {
     expect(() => assertNavigable("not a url")).toThrow(/Invalid URL/);
   });
 
-  it("blocks cloud metadata endpoints", () => {
+  it("blocks cloud metadata endpoints including mapped-v6 forms", () => {
     expect(() => assertNavigable("http://169.254.169.254/latest")).toThrow(
       /metadata/,
     );
     expect(() => assertNavigable("http://metadata.google.internal/")).toThrow(
       /metadata/,
     );
+    expect(() => assertNavigable("http://[::ffff:169.254.169.254]/")).toThrow(
+      /metadata/,
+    );
+    expect(() => assertNavigable("http://[::ffff:a9fe:a9fe]/")).toThrow(
+      /metadata/,
+    );
+  });
+
+  it("isMetadataHost stays narrow — localhost and LAN remain allowed", () => {
+    expect(isMetadataHost("localhost")).toBe(false);
+    expect(isMetadataHost("192.168.1.10")).toBe(false);
+    expect(isMetadataHost("[::1]")).toBe(false);
+    expect(isMetadataHost("64:ff9b::a9fe:a9fe")).toBe(true);
   });
 });
 
@@ -129,6 +146,21 @@ describe("BrowserSession (real chromium)", () => {
         session.consoleLog.some((e) => e.text.includes("hello from page")),
       ).toBe(true);
       expect(await page.evaluate("1 + 1")).toBe(2);
+    },
+  );
+
+  it(
+    "resolver rules block metadata for ALL requests, not just goto",
+    { timeout: 30_000 },
+    async () => {
+      const page = await session.getPage();
+      // Chromium-level block: resolution fails locally and fast.
+      await expect(
+        page.goto("http://metadata.google.internal/", { timeout: 10_000 }),
+      ).rejects.toThrow(/ERR_NAME_NOT_RESOLVED/);
+      await expect(
+        page.goto("http://169.254.169.254/latest", { timeout: 10_000 }),
+      ).rejects.toThrow(/ERR_NAME_NOT_RESOLVED/);
     },
   );
 
