@@ -38,6 +38,7 @@ import {
   WAIT_DESCRIPTION,
 } from "./prompt.ts";
 import { loadAgentDefinitions } from "./src/agents.ts";
+import { createExternalChild } from "./src/backends/index.ts";
 import {
   createChild,
   resolveChildTrust,
@@ -191,6 +192,20 @@ export default function subagents(pi: ExtensionAPI) {
       const definition = definitions.get(options.agentType);
       if (!definition) {
         throw new Error(buildAgentTypeError(options.agentType, definitions));
+      }
+
+      if (definition.backend !== "pi") {
+        // External runtimes (Claude Code / Codex) bring their own tools,
+        // models, and permission systems; model hints are passed through
+        // verbatim, never resolved against pi's registry.
+        return createExternalChild(definition.backend, {
+          cwd: options.cwd,
+          model: options.model ?? definition.model,
+          thinking: options.thinking ?? definition.thinking,
+          appendSystemPrompt: definition.systemPrompt,
+          sessionName: options.title,
+          onEvent: options.onEvent,
+        });
       }
 
       return createChild({

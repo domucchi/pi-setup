@@ -16,17 +16,42 @@ edit freely; it is read at load time, no code changes needed.
   whenever the task does not require edits.
 - `worker` — full-tool execution: bounded implementation tasks with a
   runnable check ("fix X and run the tests", "apply this rename").
+- `claude` — a real Claude Code instance (Anthropic models on the
+  Claude subscription, full Claude Code toolset, permissions bypassed).
+  Use when the work wants Claude's judgment/taste, or a second opinion
+  from a different model family. Supports mid-run steering via
+  subagent_send.
+- `codex` — a real Codex instance (GPT models on the Codex
+  subscription, shell/apply_patch/web-search, sandbox bypassed). Cheap
+  abundant capacity for bulk or mechanical work. No mid-run steering —
+  wait for settle, then send follow-ups.
+
+## Backend routing
+
+- Default `worker`/`explore` (pi backend): stays in-process, inherits
+  the session model — right for most bounded tasks.
+- Reach for `claude` when taste/judgment matters (user-facing text, API
+  design, tricky reviews) or when Claude-only models are wanted —
+  they are unavailable inside pi itself.
+- Reach for `codex` for parallel bulk work where capacity beats nuance
+  (sweeps, mechanical refactors, independent investigations).
+- External children cannot see pi tools or this session; their prompts
+  must be fully self-contained (same rule as always, more so).
+- `model` on claude/codex spawns is passed through natively (e.g.
+  "opus", "gpt-5.3-codex") — never pi provider/model ids.
 
 ## Model and thinking selection
 
-Default: omit `model` — children inherit the parent session's model and
-thinking level, which is usually right.
+Default: omit `model` — pi children inherit the parent session's model
+and thinking level, which is usually right.
 
 <!-- Roster: fill in as preferences emerge, e.g.
-| Work shape                  | Model            | Thinking |
+| Work shape                  | Agent type       | Thinking |
 | --------------------------- | ---------------- | -------- |
-| broad read-only scouting    | (cheaper model)  | low      |
-| implementation with checks  | (parent default) | medium+  |
+| broad read-only scouting    | explore          | low      |
+| implementation with checks  | worker           | medium+  |
+| taste-sensitive review      | claude           | medium   |
+| bulk mechanical sweeps      | codex            | low      |
 -->
 
 ## Delegation rules

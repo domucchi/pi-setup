@@ -12,9 +12,11 @@ import type {
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { loadAgentDefinitions } from "../../subagents/src/agents.ts";
+import { createExternalChild } from "../../subagents/src/backends/index.ts";
 import {
   createChild,
   resolveModel,
+  type ChildEvent,
   type ChildHandle,
   type RunOutcome,
 } from "../../subagents/src/child.ts";
@@ -168,6 +170,13 @@ export function createAgentRunner(options: {
           error: `Unknown agentType "${request.opts.agentType}".`,
         });
       }
+      if (definition.backend !== "pi" && request.opts.schema) {
+        return finalize({
+          ok: false,
+          output: "",
+          error: `agentType "${definition.name}" runs on the ${definition.backend} backend, which does not support the schema option. Drop schema or use a pi-backed agentType.`,
+        });
+      }
 
       const capture: { value?: unknown } = {};
       const customTools = request.opts.schema
@@ -177,41 +186,58 @@ export function createAgentRunner(options: {
         ? `\n\nWhen you are done, call the ${REPORT_TOOL_NAME} tool exactly once with your final result — its arguments are your return value. Do not answer in prose instead.`
         : "";
 
+      const onChildEvent = (
+        event: ChildEvent,
+        resolve: (outcome: RunOutcome) => void,
+      ) => {
+        if (event.type === "activity") {
+          if (event.preview.startsWith("→")) toolCalls += 1;
+          options.onEvent?.({
+            seq: request.id,
+            label,
+            phase: request.opts.phase,
+            state: "activity",
+            preview: event.preview,
+            ...telemetry(),
+          });
+        } else if (event.type === "run-settled") {
+          resolve(event.outcome);
+        }
+      };
+
       const settled = new Promise<RunOutcome>((resolve) => {
-        void createChild({
-          cwd: options.context.cwd,
-          projectTrusted: options.context.projectTrusted,
-          modelRegistry: options.context.modelRegistry,
-          model: resolveModel(
-            options.context.modelRegistry,
-            request.opts.model ?? definition.model,
-            options.context.parentModel,
-          ),
-          thinkingLevel:
-            request.opts.effort ?? request.opts.thinking ?? definition.thinking ?? undefined,
-          allowTools: definition.tools
-            ? [...definition.tools, ...(request.opts.schema ? [REPORT_TOOL_NAME] : [])]
-            : undefined,
-          appendSystemPrompt: (definition.systemPrompt ?? "") + schemaInstruction,
-          customTools,
-          inMemorySession: true,
-          sessionName: `workflow: ${label}`,
-          onEvent: (event) => {
-            if (event.type === "activity") {
-              if (event.preview.startsWith("→")) toolCalls += 1;
-              options.onEvent?.({
-                seq: request.id,
-                label,
-                phase: request.opts.phase,
-                state: "activity",
-                preview: event.preview,
-                ...telemetry(),
+        const makeChild =
+          definition.backend === "pi"
+            ? createChild({
+                cwd: options.context.cwd,
+                projectTrusted: options.context.projectTrusted,
+                modelRegistry: options.context.modelRegistry,
+                model: resolveModel(
+                  options.context.modelRegistry,
+                  request.opts.model ?? definition.model,
+                  options.context.parentModel,
+                ),
+                thinkingLevel:
+                  request.opts.effort ?? request.opts.thinking ?? definition.thinking ?? undefined,
+                allowTools: definition.tools
+                  ? [...definition.tools, ...(request.opts.schema ? [REPORT_TOOL_NAME] : [])]
+                  : undefined,
+                appendSystemPrompt: (definition.systemPrompt ?? "") + schemaInstruction,
+                customTools,
+                inMemorySession: true,
+                sessionName: `workflow: ${label}`,
+                onEvent: (event) => onChildEvent(event, resolve),
+              })
+            : createExternalChild(definition.backend, {
+                cwd: options.context.cwd,
+                model: request.opts.model ?? definition.model,
+                thinking:
+                  request.opts.effort ?? request.opts.thinking ?? definition.thinking,
+                appendSystemPrompt: definition.systemPrompt,
+                sessionName: `workflow: ${label}`,
+                onEvent: (event) => onChildEvent(event, resolve),
               });
-            } else if (event.type === "run-settled") {
-              resolve(event.outcome);
-            }
-          },
-        }).then(
+        void makeChild.then(
           (child) => {
             handle = child;
             disposers.push(() => child.dispose());

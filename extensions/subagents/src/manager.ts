@@ -274,6 +274,9 @@ export class SubagentManager {
     entry.snapshot.tokens = usage?.tokens ?? entry.snapshot.tokens;
     entry.snapshot.contextWindow =
       usage?.contextWindow ?? entry.snapshot.contextWindow;
+    // External backends learn their real model asynchronously (init
+    // message / thread settings) — refresh the label at settle time.
+    entry.snapshot.model = entry.child?.modelLabel ?? entry.snapshot.model;
 
     const consumed = entry.settleWaiters.length > 0;
     this.releaseWaiters(entry);

@@ -1,11 +1,15 @@
 import { readdirSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 
+export type BackendName = "pi" | "claude" | "codex";
+
 /** A subagent role parsed from agents/*.md (Claude Code style). */
 export interface AgentDefinition {
   name: string;
   description: string;
-  /** Tool allowlist; undefined = all tools (minus the child denylist). */
+  /** Which runtime executes this role. Default: in-process pi child. */
+  backend: BackendName;
+  /** Tool allowlist; undefined = all tools (minus the child denylist). pi only. */
   tools?: string[];
   model?: string;
   thinking?: string;
@@ -18,6 +22,7 @@ export interface AgentDefinition {
 export const WORKER: AgentDefinition = {
   name: "worker",
   description: "General-purpose subagent with the full toolset.",
+  backend: "pi",
   source: "built-in",
 };
 
@@ -47,10 +52,14 @@ export function parseAgentFile(
     .map((t) => t.trim())
     .filter(Boolean);
   const body = match[2].trim();
+  const backendField = fields.get("backend");
+  const backend: BackendName =
+    backendField === "claude" || backendField === "codex" ? backendField : "pi";
 
   return {
     name,
     description: fields.get("description") ?? "",
+    backend,
     tools: tools && tools.length > 0 ? tools : undefined,
     model: fields.get("model") || undefined,
     thinking: fields.get("thinking") || undefined,

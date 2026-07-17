@@ -6,7 +6,24 @@ Functionally complete harness (10 hand-written extensions + MCP via
 pi-mcp-adapter) with the full UI pass DONE. 186 vitest tests, tsc clean.
 See `PLAN.md` for architecture/decisions; `README.md`/`SETUP.md` for the map.
 
-## NEXT: the remaining big build
+## Big builds: DONE
+
+### DONE: claude/codex subagent backends
+
+`agents/*.md` roles carry `backend: pi|claude|codex` (starter roles
+agents/claude.md, agents/codex.md). Externals implement ChildHandle in
+extensions/subagents/src/backends/ — claude = Agent SDK query()
+streaming-input bridge (bypassPermissions; steer = native mid-run
+queue), codex = `codex app-server --stdio` JSON-RPC (approvalPolicy
+never + danger-full-access; NO mid-run steering — steer() throws with
+guidance). Binary resolution skips cmux shims (resolve.ts). Workflows
+route through the same dispatch; schema on a non-pi agentType fails
+with a clear error (report tool is pi-only). Model hints pass through
+natively ("opus", "gpt-5.3-codex"), never pi registry ids. Verified
+end-to-end against BOTH real CLIs (a throwaway vitest file driving
+createClaudeChild/createCodexChild with "reply BACKEND-OK" — not kept
+in the suite, it costs real tokens per run). Routing doctrine:
+skills/subagents/SKILL.md.
 
 ### DONE: browser extension (extensions/browser/)
 

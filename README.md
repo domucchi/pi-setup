@@ -12,8 +12,9 @@ rather than installed as a package.
 - **background-terminals** — `bg_start`/`bg_status`/`bg_list`/`bg_kill` for
   long-running processes; `/ps` to inspect.
 - **file-search** — `fd` and `rg` as first-class tools.
-- **subagents** — in-process pi children with markdown roles
-  (`agents/*.md`), interactive `subagent_send`; `/subagents`.
+- **subagents** — children with markdown roles (`agents/*.md`) on three
+  backends: in-process pi (default), real Claude Code (Agent SDK), and
+  real Codex (`app-server`); interactive `subagent_send`; `/subagents`.
 - **workflows** — model-authored orchestration scripts run in a
   sandboxed child; Claude Code-compatible DSL; `/workflows`,
   `workflow_status` for polling background runs.
