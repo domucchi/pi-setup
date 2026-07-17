@@ -22,7 +22,7 @@ work around those restrictions.
 ## Spawn the child
 
 Load the `subagents` skill for current model routing, then spawn
-`agent_type: "computer-use"`. Its role carries the durable GUI execution and
+`agent_type: "codex:computer-use"`. Its role carries the durable GUI execution and
 safety policy. Keep the task prompt specific to this run:
 
 - target app, window, profile, account, and relevant starting state;
